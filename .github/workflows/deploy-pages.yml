@@ -1,0 +1,54 @@
+name: Deploy QuoLab Nexus preview
+
+on:
+  push:
+    branches: ["web-preview"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "github-pages-preview"
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout preview branch
+        uses: actions/checkout@v4
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - name: Assemble static website from the preserved integration ZIP
+        run: |
+          set -euo pipefail
+          test -s quolab-nexus-2.0-data-analyzer-integration.zip
+          mkdir source
+          unzip -q quolab-nexus-2.0-data-analyzer-integration.zip -d source
+          ROOT="source/quantum-computing-open-lab-2.0-main"
+          test -s "$ROOT/index.html"
+          test -s "$ROOT/quolab-nexus-data-analyzer.html"
+          rm -rf dist
+          mkdir -p dist
+          cp "$ROOT/index.html" "$ROOT"/quolab-nexus-*.html "$ROOT"/quolab-nexus-*.js "$ROOT/.nojekyll" dist/
+          test -s dist/index.html
+          test -s dist/quolab-nexus-data-analyzer.html
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
