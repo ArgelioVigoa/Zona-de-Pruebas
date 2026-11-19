@@ -20,10 +20,6 @@ jobs:
     steps:
       - name: Checkout preview branch
         uses: actions/checkout@v4
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
-        with:
-          enablement: true
       - name: Assemble static website from the preserved integration ZIP
         run: |
           set -euo pipefail
