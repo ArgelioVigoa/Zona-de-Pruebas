@@ -824,10 +824,12 @@ function placeGate(gateId, qubit) {
     if (qCtrl === qSwap1) qSwap1 = (qSwap1 + 1) % circuit.qubits;
     if (qCtrl === qSwap2) qSwap2 = (qSwap2 + 1) % circuit.qubits;
     if (qSwap1 === qSwap2) qSwap2 = (qSwap2 + 1) % circuit.qubits;
-    const qs = [qCtrl, qSwap1, qSwap2].sort((a, b) => a - b);
+    const qs = [qCtrl, qSwap1, qSwap2];
     if (circuit.gates.some(g => g.id === 'M' && !g.autoMeasurement && qs.includes(g.q))) { isUpdatingFromCircuit = false; notify('❌ A gate cannot be placed after a measurement.'); return; }
     removeAutoMeasurementsForWires(qs);
-    circuit.gates.push({ id: gateId, q: qs[0], q2: qs[1], q3: qs[2], def: def, uid: nextId++ });
+    // Preserve Qiskit operand order: CCX controls are q/q2 and target is q3;
+    // CSWAP control is q and its two swap targets are q2/q3.
+    circuit.gates.push({ id: gateId, q: qCtrl, q2: qSwap1, q3: qSwap2, def: def, uid: nextId++ });
   } else if (def.multi) {
     if (circuit.qubits < 2) { notify('You need at least 2 qubits'); isUpdatingFromCircuit = false; return; }
     const q2 = qubit + 1 < circuit.qubits ? qubit + 1 : qubit - 1;
@@ -996,31 +998,22 @@ function renderCircuit() {
       html += `<div class="qcol-block" title="${escapeHtml(g.block.tip)}" aria-label="${escapeHtml(g.block.tip)}" tabindex="0" role="button" onclick="nexusBlockInfo(${g.uid})"
         style="position:absolute;left:${left}px;top:${g.q * ROW_HEIGHT + 4}px;width:${bw}px;height:${bh}px;box-sizing:border-box;background:linear-gradient(135deg,#4a148c,#8e24aa);border:1.5px solid #ce93d8;border-radius:8px;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;font:700 12px monospace;text-align:center;cursor:help;overflow:hidden;padding:2px;">${escapeHtml(g.block.label)}<span style="font-weight:400;font-size:9px;opacity:.85;">${escapeHtml(g.block.sub)}</span></div>`;
     } else if (g.q3 !== undefined) {
-      const qs = [g.q, g.q2, g.q3].sort((a, b) => a - b);
-      const topY = qs[0] * ROW_HEIGHT;
-      const height = (qs[2] - qs[0]) * ROW_HEIGHT;
+      const qs = [g.q, g.q2, g.q3];
+      const minQ = Math.min(...qs), maxQ = Math.max(...qs);
+      const topY = minQ * ROW_HEIGHT, height = (maxQ - minQ) * ROW_HEIGHT;
+      const y1 = (g.q - minQ) * ROW_HEIGHT + ROW_HEIGHT / 2;
+      const y2 = (g.q2 - minQ) * ROW_HEIGHT + ROW_HEIGHT / 2;
+      const y3 = (g.q3 - minQ) * ROW_HEIGHT + ROW_HEIGHT / 2;
       const gCol = g.def?.bg || '#0088ff';
-      let svg = '';
+      let svg = '<line x1="26" y1="0" x2="26" y2="' + (ROW_HEIGHT + height) + '" stroke="' + gCol + '" stroke-width="2.5"/>';
       if (g.id === 'CCX') {
-        svg = `<svg width="52" height="${ROW_HEIGHT + height}" viewBox="0 0 52 ${ROW_HEIGHT + height}" style="cursor:pointer;" onclick="removeGate(${g.uid})">
-          <line x1="26" y1="0" x2="26" y2="${ROW_HEIGHT + height}" stroke="${gCol}" stroke-width="2.5"/>
-          <circle cx="26" cy="${ROW_HEIGHT / 2}" r="8" fill="${gCol}" stroke="rgba(255,255,255,.9)" stroke-width="1.5"/>
-          <circle cx="26" cy="${ROW_HEIGHT / 2 + (qs[1] - qs[0]) * ROW_HEIGHT}" r="8" fill="${gCol}" stroke="rgba(255,255,255,.9)" stroke-width="1.5"/>
-          <circle cx="26" cy="${ROW_HEIGHT / 2 + height}" r="14" fill="none" stroke="${gCol}" stroke-width="2.5"/>
-          <line x1="18" y1="${ROW_HEIGHT / 2 + height}" x2="34" y2="${ROW_HEIGHT / 2 + height}" stroke="${gCol}" stroke-width="2"/>
-          <line x1="26" y1="${ROW_HEIGHT / 2 + height - 10}" x2="26" y2="${ROW_HEIGHT / 2 + height + 10}" stroke="${gCol}" stroke-width="2"/>
-        </svg>`;
+        for (const y of [y1, y2]) svg += '<circle cx="26" cy="' + y + '" r="8" fill="' + gCol + '" stroke="rgba(255,255,255,.9)" stroke-width="1.5"/>';
+        svg += '<circle cx="26" cy="' + y3 + '" r="14" fill="none" stroke="' + gCol + '" stroke-width="2.5"/><path d="M18 ' + y3 + ' H34 M26 ' + (y3-10) + ' V' + (y3+10) + '" stroke="' + gCol + '" stroke-width="2"/>';
       } else if (g.id === 'CSW') {
-        svg = `<svg width="52" height="${ROW_HEIGHT + height}" viewBox="0 0 52 ${ROW_HEIGHT + height}" style="cursor:pointer;" onclick="removeGate(${g.uid})">
-          <line x1="26" y1="0" x2="26" y2="${ROW_HEIGHT + height}" stroke="${gCol}" stroke-width="2.5"/>
-          <circle cx="26" cy="${ROW_HEIGHT / 2}" r="8" fill="${gCol}" stroke="rgba(255,255,255,.9)" stroke-width="1.5"/>
-          <line x1="18" y1="${ROW_HEIGHT / 2 + (qs[1] - qs[0]) * ROW_HEIGHT - 6}" x2="34" y2="${ROW_HEIGHT / 2 + (qs[1] - qs[0]) * ROW_HEIGHT + 6}" stroke="${gCol}" stroke-width="2"/>
-          <line x1="34" y1="${ROW_HEIGHT / 2 + (qs[1] - qs[0]) * ROW_HEIGHT - 6}" x2="18" y2="${ROW_HEIGHT / 2 + (qs[1] - qs[0]) * ROW_HEIGHT + 6}" stroke="${gCol}" stroke-width="2"/>
-          <line x1="18" y1="${ROW_HEIGHT / 2 + height - 6}" x2="34" y2="${ROW_HEIGHT / 2 + height + 6}" stroke="${gCol}" stroke-width="2"/>
-          <line x1="34" y1="${ROW_HEIGHT / 2 + height - 6}" x2="18" y2="${ROW_HEIGHT / 2 + height + 6}" stroke="${gCol}" stroke-width="2"/>
-        </svg>`;
+        svg += '<circle cx="26" cy="' + y1 + '" r="8" fill="' + gCol + '" stroke="rgba(255,255,255,.9)" stroke-width="1.5"/>';
+        for (const y of [y2, y3]) svg += '<path d="M18 ' + (y-6) + ' L34 ' + (y+6) + ' M34 ' + (y-6) + ' L18 ' + (y+6) + '" stroke="' + gCol + '" stroke-width="2"/>';
       }
-      html += `<div style="position:absolute; left:${left}px; top:${topY}px;">${svg}</div>`;
+      html += '<div style="position:absolute; left:' + left + 'px; top:' + topY + 'px;"><svg width="52" height="' + (ROW_HEIGHT + height) + '" viewBox="0 0 52 ' + (ROW_HEIGHT + height) + '" style="cursor:pointer;" onclick="removeGate(' + g.uid + ')">' + svg + '</svg></div>';
     } else if (g.q2 !== undefined) {
       const minQ = Math.min(g.q, g.q2), maxQ = Math.max(g.q, g.q2);
       const topY = minQ * ROW_HEIGHT;
