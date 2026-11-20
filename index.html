@@ -1222,6 +1222,31 @@ class QuOLabNexusConfigSyncReader {
     else if (typeof d.type === 'string' && /^(?:NEXUS|QCOL)_/.test(d.type)) d.type = 'OPENQ_' + d.type.replace(/^(?:NEXUS|QCOL)_/, '');
     if (typeof d.key === 'string' && d.key.indexOf('qcol_') === 0) d.key = 'openq_' + d.key.slice(5);
 
+    // Custom quantum-gate handoff: only accept messages from the registered same-origin iframe.
+    if (d.type === 'OPENQ_CUSTOM_GATE') {
+      const gateFrame = iframes['gate-designer'];
+      if (!gateFrame || e.source !== gateFrame.contentWindow || e.origin !== location.origin) return;
+      const g = d.gate;
+      const validEnvelope = d.protocol === 'quolab.custom-gate' && d.protocolVersion === '1.0.0'
+        && typeof d.requestId === 'string' && g && g.schema === 'quolab.custom-gate'
+        && g.schemaVersion === '1.0.0' && [1,2].includes(Number(g.qubits))
+        && g.matrix && g.matrix.basisOrder === 'q0-lsb'
+        && Array.isArray(g.matrix.data) && g.matrix.data.length === 2 ** Number(g.qubits)
+        && g.matrix.data.every(row => Array.isArray(row) && row.length === 2 ** Number(g.qubits)
+          && row.every(z => z && Number.isFinite(z.re) && Number.isFinite(z.im)));
+      const architect = iframes['architect'];
+      if (!validEnvelope) {
+        gateFrame.contentWindow.postMessage({type:'OPENQ_CUSTOM_GATE_RESPONSE',requestId:d.requestId,ok:false,message:'Invalid custom-gate message or matrix structure.'},location.origin);
+        return;
+      }
+      if (!architect || !architect.contentWindow) {
+        gateFrame.contentWindow.postMessage({type:'OPENQ_CUSTOM_GATE_RESPONSE',requestId:d.requestId,ok:false,message:'Open Quantum Architect once, then return here and send the gate again.'},location.origin);
+        return;
+      }
+      architect.contentWindow.postMessage(d,location.origin);
+      return;
+    }
+
     // Enrutador central: las órdenes y respuestas de App Studio atraviesan index.html.
     if (d.type === 'OPENQ_STUDIO_COMMAND' || d.type === 'NEXUS_STUDIO_COMMAND') {
       const puzzle = iframes['quantum-puzzle'];
