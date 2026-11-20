@@ -1805,12 +1805,12 @@ async function initPyodide() {
 function mapOpNameToGateId(opName) {
     const map = {
         'h': 'H', 'x': 'X', 'y': 'Y', 'z': 'Z', 's': 'S', 't': 'T', 'sx': 'SX',
-        'rx': 'RX', 'ry': 'RY', 'rz': 'RZ', 'p': 'RZ',
-        'cx': 'CX', 'cz': 'CZ', 'swap': 'SWAP', 'cp': 'CZ',
-        'ccx': 'CCX', 'cswap': 'CSW', 'mcx': 'CCX',
+        'rx': 'RX', 'ry': 'RY', 'rz': 'RZ',
+        'cx': 'CX', 'cz': 'CZ', 'swap': 'SWAP',
+        'ccx': 'CCX', 'cswap': 'CSW',
         'measure': 'M'
     };
-    return map[opName] || 'H';
+    return map[opName] || null;
 }
 
 
@@ -1886,7 +1886,7 @@ function nexusExtractStruct(output) {
 }
 const _BLOCK_DEF = { id: 'BLK', sym: '▦', bg: '#6a1b9a', glow: '#c06bff', desc: 'Composite block', code: '', block: true };
 function mapOpStrict(opName) {
-  const map = { 'h':'H','x':'X','y':'Y','z':'Z','s':'S','t':'T','sx':'SX','rx':'RX','ry':'RY','rz':'RZ','p':'RZ',
+  const map = { 'h':'H','x':'X','y':'Y','z':'Z','s':'S','t':'T','sx':'SX','rx':'RX','ry':'RY','rz':'RZ',
                 'cx':'CX','cz':'CZ','swap':'SWAP','ccx':'CCX','cswap':'CSW' };
   return map[opName] || null;
 }
@@ -1941,7 +1941,7 @@ function nexusOpsToGates(ops) {
     if (!baseDef) continue;
     const params = Array.isArray(o.p) ? o.p : [];
     const def = { ...baseDef };
-    if (['RX','RY','RZ'].includes(id) && params.length) def.code = def.code.replace(/np\\.pi\\/4/, String(params[0]));
+    if (['RX','RY','RZ'].includes(id) && params.length) def.code = def.code.replace('np.pi/4', String(params[0]));
     if (qs.length === 1) gates.push({ id, q: qs[0], params, def, uid });
     else if (qs.length === 2) gates.push({ id, q: qs[0], q2: qs[1], params: o.p || [], def, uid });
     else { gates.push({ id, q: qs[0], q2: qs[1], q3: qs[2], params: o.p || [], def, uid }); }
