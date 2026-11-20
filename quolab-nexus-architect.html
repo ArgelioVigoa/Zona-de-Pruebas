@@ -1844,6 +1844,7 @@ const QCOL_PROBE_PY = [
   "            if __op.name in ('barrier', 'delay'):",
   '                continue',
   "            __d = {'n': __op.name, 'q': [__qc.find_bit(__q).index for __q in __ci.qubits]}",
+  "            try: __d['p'] = [str(__p) for __p in __op.params]\n            except Exception: pass",
   "            if __op.name == 'PauliEvolution':",
   "                __info = {'label': 'exp(-iHt)'}",
   '                try:',
@@ -1886,7 +1887,7 @@ function nexusExtractStruct(output) {
 const _BLOCK_DEF = { id: 'BLK', sym: '▦', bg: '#6a1b9a', glow: '#c06bff', desc: 'Composite block', code: '', block: true };
 function mapOpStrict(opName) {
   const map = { 'h':'H','x':'X','y':'Y','z':'Z','s':'S','t':'T','sx':'SX','rx':'RX','ry':'RY','rz':'RZ','p':'RZ',
-                'cx':'CX','cz':'CZ','swap':'SWAP','cp':'CZ','ccx':'CCX','cswap':'CSW','mcx':'CCX' };
+                'cx':'CX','cz':'CZ','swap':'SWAP','ccx':'CCX','cswap':'CSW' };
   return map[opName] || null;
 }
 function _blockText(o) {
@@ -1936,11 +1937,14 @@ function nexusOpsToGates(ops) {
       gates.push({ id: 'BLK', q: lo, q2: hi, qs, def: _BLOCK_DEF, uid, block: { label: bt.label, sub: bt.sub, tip: bt.tip, w: o.info ? 3 : 1 } });
       continue;
     }
-    const def = findGateDef(id);
-    if (!def) continue;
-    if (qs.length === 1) gates.push({ id, q: qs[0], def, uid });
-    else if (qs.length === 2) gates.push({ id, q: Math.min(qs[0], qs[1]), q2: Math.max(qs[0], qs[1]), def, uid });
-    else { const so = [...qs].sort((a, b) => a - b); gates.push({ id, q: so[0], q2: so[1], q3: so[2], def, uid }); }
+    const baseDef = findGateDef(id);
+    if (!baseDef) continue;
+    const params = Array.isArray(o.p) ? o.p : [];
+    const def = { ...baseDef };
+    if (['RX','RY','RZ'].includes(id) && params.length) def.code = def.code.replace(/np\\.pi\\/4/, String(params[0]));
+    if (qs.length === 1) gates.push({ id, q: qs[0], params, def, uid });
+    else if (qs.length === 2) gates.push({ id, q: qs[0], q2: qs[1], params: o.p || [], def, uid });
+    else { gates.push({ id, q: qs[0], q2: qs[1], q3: qs[2], params: o.p || [], def, uid }); }
   }
   return gates;
 }
@@ -3408,6 +3412,7 @@ function returnToNotebook(){
             q:   g.q,
             q2:  g.q2,
             q3:  g.q3,
+            params: g.params || [],
             uid: g.uid,
             qs:  g.qs, block: g.block || null,
             def: {
