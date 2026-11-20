@@ -24,7 +24,12 @@ main{max-width:1450px;margin:auto;padding:18px;display:grid;grid-template-column
 </section>
 <section class="panel"><h2>02 / MATRIX & STATE ACTION</h2><div class="row"><div><label>Input basis state</label><select id="basis"><option value="0">|0⟩</option></select></div><div><label>Numerical tolerance</label><input id="tol" value="1e-10"></div></div>
 <div id="action" class="status" style="margin-top:10px">State action appears here.</div><div id="bloch" class="status" style="margin-top:8px">Bloch sphere is available for one-qubit gates.</div><h3>Qiskit export</h3><pre id="qiskit">Validate the matrix first.</pre><div class="actions"><button id="copy-code">Copy Qiskit</button><button id="download-json">Export JSON</button><button id="send-architect" class="primary">Send to Architect</button><button id="send-notebook">Send Qiskit to Notebook</button></div><h3>Custom gate JSON</h3><pre id="json-preview"></pre></section>
-<aside class="panel right"><h2>03 / VALIDATION & LIBRARY</h2><div id="validation" class="status warn">Not validated</div><h3>Saved gates</h3><div id="saved" class="list"></div><div class="actions"><button id="import">Import JSON</button><input id="file" type="file" accept=".json,application/json" hidden></div><h3>Comparison notes</h3><div class="small">La matriz y el circuito se comparan numéricamente. La fase global se informa por separado. Una matriz unitaria no tiene por qué pertenecer a SU(d): det(U) no tiene que ser 1.</div><div id="phase" class="status" style="margin-top:8px">Global phase: pending</div></aside>
+<aside class="panel right"><h2>03 / VALIDATION & LIBRARY</h2><div id="validation" class="status warn">Not validated</div><h3>Saved gates</h3><div id="saved" class="list"></div><div class="actions"><button id="import">Import JSON</button><input id="file" type="file" accept=".json,application/json" hidden></div><h3>Live backend test</h3>
+<div class="small">Runs this exact matrix on the configured QuOlab Qiskit backend using QuantumCircuit and Operator. This is an exact matrix check, not a noisy hardware run.</div>
+<label>Backend URL</label><input id="backend-url" type="url" placeholder="https://your-quolab-backend.example">
+<div class="actions"><button id="backend-health">Check connection</button><button id="backend-test" class="primary">Test on Qiskit backend</button></div>
+<div id="backend-status" class="status warn" style="margin-top:8px">Backend not checked yet.</div>
+<h3>Comparison notes</h3><div class="small">La matriz y el circuito se comparan numéricamente. La fase global se informa por separado. Una matriz unitaria no tiene por qué pertenecer a SU(d): det(U) no tiene que ser 1.</div><div id="phase" class="status" style="margin-top:8px">Global phase: pending</div></aside>
 </main><footer>QuOLab Nexus · Custom Gate Schema 1.0.0 · Local-first</footer>
 <script>
 (function(){
@@ -81,6 +86,41 @@ $('identity').onclick=function(){matrix=eye(dim());lastCircuitMatrix=null;render
 $('add-op').onclick=function(){var id=$('op-gate').value,q=Number($('op-q').value),q2=Number($('op-q2').value),angle=Number($('op-angle').value),multi=['CX','CZ','SWAP'].indexOf(id)>=0;if(n!==2)return alert('Set qubit count to 2.');if(multi&&q===q2)return alert('Select two different qubits.');if(!multi&&q>=n)return alert('Qubit out of range.');if(!multi&&!Number.isFinite(angle))return alert('Invalid rotation angle.');ops.push({id:id,q:q,q2:multi?q2:undefined,angle:multi?undefined:angle});renderOps()};
 $('clear-ops').onclick=function(){ops=[];renderOps()};$('build').onclick=function(){try{lastCircuitMatrix=circuit();matrix=lastCircuitMatrix.map(function(row){return row.map(function(z){return C(z[0],z[1])})});render(matrix);setMode('matrix');validate();$('notice').textContent='Circuit matrix built. Matrix/circuit and global-phase comparison are enabled.'}catch(e){$('notice').className='status bad';$('notice').textContent=e.message}};
 $('basis').onchange=previews;$('tol').onchange=function(){lastValidation=null;previews()};$('matrix').addEventListener('input',function(){lastValidation=null;previews()});
+
+function backendBase(){var raw=$('backend-url').value.trim().replace(/\/+$/,'');if(!/^https?:\/\//i.test(raw))throw Error('Enter a valid backend URL starting with https:// or http://');return raw}
+function unwrapBackend(raw,isHF){var d=isHF?(raw&&raw.data?raw.data[0]:raw):raw;if(typeof d==='string'){try{d=JSON.parse(d)}catch(e){d={success:true,output:d}}}return d||{}}
+function backendCode(p){
+ var rows=p.matrix.data.map(function(row){return '['+row.map(function(z){return '('+Number(z.re).toPrecision(17)+(z.im<0?'':' + ')+Number(z.im).toPrecision(17)+'j)'}).join(', ')+']'}).join(',\n');
+ return 'import numpy as np\nfrom qiskit import QuantumCircuit\nfrom qiskit.quantum_info import Operator\n\nU = np.array(['+rows+'], dtype=complex)\nqc = QuantumCircuit('+p.qubits+')\nqc.unitary(U, list(range('+p.qubits+')))\nU_backend = Operator(qc).data\nmax_error = float(np.max(np.abs(U_backend - U)))\nprint("QGATE_BACKEND_TEST_MAX_ERROR=" + format(max_error, ".17g"))\n';
+}
+async function backendRequest(path,body,isHF){
+ var controller=new AbortController(),timer=setTimeout(function(){controller.abort()},30000);
+ try{var res=await fetch(backendBase()+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:controller.signal});var raw=await res.json();if(!res.ok)throw Error('HTTP '+res.status+': '+JSON.stringify(raw).slice(0,400));return unwrapBackend(raw,isHF)}
+ finally{clearTimeout(timer)}
+}
+$('backend-url').value=localStorage.getItem('openq_colab_url')||'';
+$('backend-health').onclick=async function(){
+ var box=$('backend-status');box.className='status warn';box.textContent='Checking backend health…';
+ try{var base=backendBase(),isHF=/hf\.space|huggingface/i.test(base),d=await backendRequest(isHF?'/health/predict':'/health',isHF?{data:['']}:{},isHF);
+ if(d.status!=='ok'&&d.status!=='degraded'&&!d.libs)throw Error('Unexpected health response: '+JSON.stringify(d).slice(0,350));
+ localStorage.setItem('openq_colab_url',base);box.className='status good';box.textContent='Backend responded. Status: '+(d.status||'reachable')+'\nQiskit: '+((d.versions&&d.versions.qiskit)||((d.libs||[]).includes('qiskit')?'installed':'not reported'))+'\nSandbox: '+(d.sandbox?(d.sandbox.ready?'ready':'not ready'):'not reported');
+ }catch(e){box.className='status bad';box.textContent='Connection check failed: '+(e.name==='AbortError'?'timeout':e.message)}
+};
+$('backend-test').onclick=async function(){
+ var box=$('backend-status');box.className='status warn';box.textContent='Preparing Qiskit matrix test…';
+ try{
+  var v=validate();if(!v.valid)throw Error('Validate a unitary matrix before sending it to the backend.');
+  var p=payload(),base=backendBase(),isHF=/hf\.space|huggingface/i.test(base),path=isHF?'/run/predict':'/run',body=isHF?{data:[backendCode(p)],fn_index:0}:{code:backendCode(p),lib:'qiskit'};
+  localStorage.setItem('openq_colab_url',base);box.textContent='Executing on configured backend…';
+  var d=await backendRequest(path,body,isHF);
+  if(!d.success)throw Error(d.output||'Backend execution failed.');
+  var out=String(d.output||''),m=out.match(/QGATE_BACKEND_TEST_MAX_ERROR=([0-9eE+.-]+)/);
+  if(!m)throw Error('Backend ran but did not return the expected Qiskit matrix-test marker. Output: '+out.slice(0,500));
+  var err=Number(m[1]),tol=Number($('tol').value);
+  if(!Number.isFinite(err)||err>tol)throw Error('Qiskit matrix mismatch. Maximum error '+err+' (tolerance '+tol+').');
+  box.className='status good';box.textContent='✓ REAL BACKEND TEST PASSED\nQiskit Operator reconstructed the matrix successfully.\nMaximum matrix error: '+err.toExponential(6)+'\nTolerance: '+tol+'\nBackend execution time: '+(d.time===undefined?'not reported':d.time+' s')+'\nThis verifies backend Qiskit execution, not execution on quantum hardware.';
+ }catch(e){box.className='status bad';box.textContent='Backend test failed: '+(e.name==='AbortError'?'request timed out':e.message)}
+};
 $('copy-code').onclick=function(){navigator.clipboard.writeText($('qiskit').textContent).then(function(){$('notice').textContent='Qiskit code copied.'}).catch(function(){$('notice').textContent='Clipboard unavailable; select the code manually.'})};
 $('download-json').onclick=function(){try{var p=payload();if(!p.validation.unitary)throw Error('Validate a unitary matrix first');var b=new Blob([JSON.stringify(p,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='custom-gate.json';a.click();URL.revokeObjectURL(a.href)}catch(e){alert(e.message)}};
 $('send-notebook').onclick=function(){try{var p=payload();if(!p.validation.unitary)throw Error('Gate must pass unitarity validation');var qcode=code(p);window.parent.postMessage({type:'OPENQ_CUSTOM_GATE_NOTEBOOK',protocol:'quolab.custom-gate',protocolVersion:'1.0.0',requestId:'qgd_nb_'+Date.now(),gate:p,code:qcode},location.origin);$('notice').className='status good';$('notice').textContent='Qiskit snippet sent to Notebook as a documented code block.'}catch(e){$('notice').className='status bad';$('notice').textContent=e.message}};
