@@ -90,7 +90,7 @@ $('basis').onchange=previews;$('tol').onchange=function(){lastValidation=null;pr
 function backendBase(){var raw=$('backend-url').value.trim().replace(/\/+$/,'');if(!/^https?:\/\//i.test(raw))throw Error('Enter a valid backend URL starting with https:// or http://');return raw}
 function unwrapBackend(raw,isHF){var d=isHF?(raw&&raw.data?raw.data[0]:raw):raw;if(typeof d==='string'){try{d=JSON.parse(d)}catch(e){d={success:true,output:d}}}return d||{}}
 function backendCode(p){
- var rows=p.matrix.data.map(function(row){return '['+row.map(function(z){return '('+Number(z.re).toPrecision(17)+(z.im<0?'':' + ')+Number(z.im).toPrecision(17)+'j)'}).join(', ')+']'}).join(',\n');
+ var rows=p.matrix.data.map(function(row){return '['+row.map(function(z){var im=Number(z.im);return '('+Number(z.re).toPrecision(17)+(im<0?' - ':' + ')+Math.abs(im).toPrecision(17)+'j)'}).join(', ')+']'}).join(',\n');
  return 'import numpy as np\nfrom qiskit import QuantumCircuit\nfrom qiskit.quantum_info import Operator\n\nU = np.array(['+rows+'], dtype=complex)\nqc = QuantumCircuit('+p.qubits+')\nqc.unitary(U, list(range('+p.qubits+')))\nU_backend = Operator(qc).data\nmax_error = float(np.max(np.abs(U_backend - U)))\nprint("QGATE_BACKEND_TEST_MAX_ERROR=" + format(max_error, ".17g"))\n';
 }
 async function backendRequest(path,body,isHF){
