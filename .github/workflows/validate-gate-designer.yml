@@ -70,5 +70,8 @@ jobs:
           assert "validateIncomingCustomGate" in arch and "qc.unitary" in arch
           assert "OPENQ_CUSTOM_GATE_NOTEBOOK" in nb
           assert "Validate unitarity" in gate and "UnitaryGate" in gate
+          assert "Test on Qiskit backend" in gate and "QGATE_BACKEND_TEST_MAX_ERROR=" in gate
+          assert "Operator(qc).data" in gate and "/run/predict" in gate and "/health/predict" in gate
+          assert "openq_colab_url" in gate and "Backend test failed" in gate
           print("Gate Designer integration contracts OK")
           PY
