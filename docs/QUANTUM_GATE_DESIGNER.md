@@ -43,6 +43,7 @@ U_{\mathrm{total}}=U_m\cdots U_2U_1.
 - Cirq and PennyLane exports are not implemented.
 - The Bloch view is a two-dimensional projection plus numeric Bloch vector, not a fully interactive 3D sphere.
 - Notebook handoff currently inserts a Markdown code block; it does not create or execute a native Python code cell.
+- The live backend test uses the backend URL stored by Quantum Architect (`openq_colab_url`) or entered manually. It requires the backend to expose the QuOlab `/health` and `/run` API (or the Hugging Face `/health/predict` and `/run/predict` API), CORS permission for the deployed Pages origin, a ready isolated sandbox, and Qiskit. The test performs an exact simulator-side matrix reconstruction; it does not execute on quantum hardware or model noise.
 - Qiskit export uses UnitaryGate/qc.unitary. Actual execution still depends on the configured backend and its Qiskit version/capabilities.
 - Browser storage is local to the current browser origin. It is not cloud-account synchronization.
 - Large matrices are deliberately capped at 4×4 in this first iteration.
@@ -56,4 +57,4 @@ GitHub Actions checks:
 - Inline JavaScript in the HTML modules parses with Node.
 - Critical integration contracts are present.
 
-These checks do not replace an interactive browser test or a real Qiskit backend execution test.
+The backend test can be launched interactively from Gate Designer. CI validates its presence and JavaScript syntax but cannot confirm the user's remote backend is online; that must be run from the deployed browser.
