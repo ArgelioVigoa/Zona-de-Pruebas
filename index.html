@@ -1223,6 +1223,17 @@ class QuOLabNexusConfigSyncReader {
     if (typeof d.key === 'string' && d.key.indexOf('qcol_') === 0) d.key = 'openq_' + d.key.slice(5);
 
     // Custom quantum-gate handoff: only accept messages from the registered same-origin iframe.
+    if (d.type === 'OPENQ_CUSTOM_GATE_NOTEBOOK') {
+      const gateFrame = iframes['gate-designer'];
+      if (!gateFrame || e.source !== gateFrame.contentWindow || e.origin !== location.origin) return;
+      const notebook = iframes['architect-pro'];
+      if (!notebook || !notebook.contentWindow || d.protocol !== 'quolab.custom-gate' || d.protocolVersion !== '1.0.0' || typeof d.code !== 'string' || d.code.length > 30000) {
+        gateFrame.contentWindow.postMessage({type:'OPENQ_CUSTOM_GATE_NOTEBOOK_RESPONSE',requestId:d.requestId,ok:false,message:'Open Quantum Notebook first, then send the Qiskit snippet again.'},location.origin);
+        return;
+      }
+      notebook.contentWindow.postMessage({type:'OPENQ_CUSTOM_GATE_NOTEBOOK',requestId:d.requestId,code:d.code,name:String(d.gate && d.gate.name || 'Custom gate').slice(0,100)},location.origin);
+      return;
+    }
     if (d.type === 'OPENQ_CUSTOM_GATE') {
       const gateFrame = iframes['gate-designer'];
       if (!gateFrame || e.source !== gateFrame.contentWindow || e.origin !== location.origin) return;
