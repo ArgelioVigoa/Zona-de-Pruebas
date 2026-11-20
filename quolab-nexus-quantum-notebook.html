@@ -603,17 +603,17 @@ function genId(){return 'c'+Date.now()+Math.random().toString(36).slice(2,6);}
 const NB_GATE_DEFS={
  H:{sym:'H',bg:'#1a5fb4',code:'qc.h({q})'},X:{sym:'X',bg:'#c01c28',code:'qc.x({q})'},Y:{sym:'Y',bg:'#7a3e99',code:'qc.y({q})'},Z:{sym:'Z',bg:'#1c71d8',code:'qc.z({q})'},
  S:{sym:'S',bg:'#c64600',code:'qc.s({q})'},T:{sym:'T',bg:'#26a269',code:'qc.t({q})'},SX:{sym:'√X',bg:'#c01c28',code:'qc.sx({q})'},
- RX:{sym:'Rx',bg:'#0077c2',code:'qc.rx(np.pi/4, {q})'},RY:{sym:'Ry',bg:'#005f6a',code:'qc.ry(np.pi/4, {q})'},RZ:{sym:'Rz',bg:'#5e35b1',code:'qc.rz(np.pi/4, {q})'},
+ RX:{sym:'Rx',bg:'#0077c2',code:'qc.rx({angle}, {q})'},RY:{sym:'Ry',bg:'#005f6a',code:'qc.ry({angle}, {q})'},RZ:{sym:'Rz',bg:'#5e35b1',code:'qc.rz({angle}, {q})'},
  CX:{sym:'CX',bg:'#007070',code:'qc.cx({q},{q2})'},CZ:{sym:'CZ',bg:'#00695c',code:'qc.cz({q},{q2})'},SWAP:{sym:'SW',bg:'#1565c0',code:'qc.swap({q},{q2})'},
  CCX:{sym:'CCX',bg:'#005f6a',code:'qc.ccx({q},{q2},{q3})'},CSWAP:{sym:'CSW',bg:'#283593',code:'qc.cswap({q},{q2},{q3})'},M:{sym:'M',bg:'#6d4c41',code:'qc.measure({q},{q})'}
 };
 function parseQiskitCircuitCode(source){
  const code=String(source||''),decl=code.match(/QuantumCircuit\s*\(\s*(\d+)/),gates=[],warnings=[];
  let qubits=decl?Math.max(1,Math.min(20,Number(decl[1]))):1;
- const add=(id,q,q2,q3)=>{const def=NB_GATE_DEFS[id];if(!def)return;gates.push({id,q,q2,q3,uid:gates.length+1,def:{bg:def.bg,sym:def.sym,code:def.code}});qubits=Math.max(qubits,q+1,(q2??-1)+1,(q3??-1)+1);};
+ const add=(id,q,q2,q3,params=[])=>{const def=NB_GATE_DEFS[id];if(!def)return;const gateDef={bg:def.bg,sym:def.sym,code:def.code};if(['RX','RY','RZ'].includes(id))gateDef.code=gateDef.code.replace('{angle}',params[0]??'np.pi/4');gates.push({id,q,q2,q3,params,uid:gates.length+1,def:gateDef});qubits=Math.max(qubits,q+1,(q2??-1)+1,(q3??-1)+1);};
  for(const line of code.split(/\r?\n/)){let m;
   if((m=line.match(/\bqc\.(h|x|y|z|s|t|sx)\s*\(\s*(\d+)\s*\)/i))){add(m[1].toUpperCase(),+m[2]);continue;}
-  if((m=line.match(/\bqc\.(rx|ry|rz)\s*\(\s*([^,]+),\s*(\d+)\s*\)/i))){add(m[1].toUpperCase(),+m[3]);continue;}
+  if((m=line.match(/\bqc\.(rx|ry|rz)\s*\(\s*([^,]+),\s*(\d+)\s*\)/i))){add(m[1].toUpperCase(),+m[3],undefined,undefined,[m[2].trim()]);continue;}
   if((m=line.match(/\bqc\.(cx|cz|swap)\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)/i))){add(m[1].toUpperCase(),+m[2],+m[3]);continue;}
   if((m=line.match(/\bqc\.(ccx|cswap)\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/i))){add(m[1].toLowerCase()==='cswap'?'CSWAP':'CCX',+m[2],+m[3],+m[4]);continue;}
   if((m=line.match(/\bqc\.measure\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)/i))){add('M',+m[1]);continue;}
@@ -635,7 +635,7 @@ function visualCircuitCode(data){
  ];
  gates.forEach(g=>{
   const def=NB_GATE_DEFS[g.id];
-  if(def)lines.push(def.code.replace(/\{q3\}/g,g.q3??0).replace(/\{q2\}/g,g.q2??0).replace(/\{q\}/g,g.q));
+  if(def){const angle=Array.isArray(g.params)&&g.params.length?String(g.params[0]):'np.pi/4';lines.push(def.code.replace(/\{angle\}/g,angle).replace(/\{q3\}/g,g.q3??0).replace(/\{q2\}/g,g.q2??0).replace(/\{q\}/g,g.q));}
  });
  lines.push(
   '',
