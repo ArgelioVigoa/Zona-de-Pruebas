@@ -798,6 +798,38 @@ function onWireDrop(e, qubit) {
 
 function findGateDef(id) { for (const cat of Object.values(GATES)) { const g = cat.find(g => g.id === id); if (g) return g; } return null; }
 
+const CUSTOM_GATE_STORE = 'quolab_custom_gates_v1';
+function validateIncomingCustomGate(g) {
+  if (!g || g.schema !== 'quolab.custom-gate' || g.schemaVersion !== '1.0.0' || ![1,2].includes(Number(g.qubits))) throw new Error('Unsupported custom-gate schema or qubit count.');
+  if (!g.matrix || g.matrix.basisOrder !== 'q0-lsb' || !Array.isArray(g.matrix.data)) throw new Error('Unsupported matrix convention.');
+  const d=2**Number(g.qubits),m=g.matrix.data;
+  if(m.length!==d||m.some(row=>!Array.isArray(row)||row.length!==d))throw new Error('Matrix dimensions do not match qubit count.');
+  if(!/^[A-Za-z0-9_+-]{1,12}$/.test(String(g.symbol||'')))throw new Error('Gate symbol must use letters, numbers, underscore, + or - (max 12).');
+  if(m.some(row=>row.some(z=>!z||!Number.isFinite(z.re)||!Number.isFinite(z.im))))throw new Error('Matrix contains invalid complex values.');
+  const cm=(a,b)=>[a[0]*b[0]-a[1]*b[1],a[0]*b[1]+a[1]*b[0]],mag=a=>Math.hypot(a[0],a[1]);let err=0;
+  for(let i=0;i<d;i++)for(let j=0;j<d;j++){let sum=[0,0];for(let k=0;k<d;k++){const z=cm([m[k][i].re,-m[k][i].im],[m[k][j].re,m[k][j].im]);sum=[sum[0]+z[0],sum[1]+z[1]];}err=Math.max(err,mag([sum[0]-(i===j?1:0),sum[1]]));}
+  const tol=Number(g.validation&&g.validation.tolerance||1e-10);if(!(err<=tol))throw new Error('Independent unitarity check failed; max error '+err);
+  return {d:d,maxError:err};
+}
+function customGatePythonMatrix(g){return '['+g.matrix.data.map(row=>'['+row.map(z=>'('+Number(z.re).toPrecision(16)+(z.im<0?'':' + ')+Number(z.im).toPrecision(16)+'j)').join(', ')+']').join(',\n')+']';}
+function installCustomGate(g,persist=true){
+  const v=validateIncomingCustomGate(g),id='QG_'+String(g.id).replace(/[^A-Za-z0-9_]/g,'_').slice(0,48);
+  const code='qc.unitary(np.array('+customGatePythonMatrix(g)+', dtype=complex), [{q}'+(v.d===4?', {q2}':'')+'])';
+  const def={id:id,sym:g.symbol,bg:'#07556a',glow:'#00ccff',desc:String(g.name||'Custom unitary').slice(0,80),code:code,customGate:true,multi:v.d===4};
+  ['1q','2q'].forEach(cat=>{GATES[cat]=GATES[cat].filter(x=>x.id!==id)});
+  GATES[v.d===2?'1q':'2q'].push(def);
+  if(persist){let all=[];try{all=JSON.parse(localStorage.getItem(CUSTOM_GATE_STORE)||'[]')}catch(_){}all=all.filter(x=>x.id!==g.id);all.unshift(g);localStorage.setItem(CUSTOM_GATE_STORE,JSON.stringify(all.slice(0,80)));}
+  return {id:id,def:def};
+}
+function loadStoredCustomGates(){try{const all=JSON.parse(localStorage.getItem(CUSTOM_GATE_STORE)||'[]');all.forEach(g=>{try{installCustomGate(g,false)}catch(err){console.warn('Skipped invalid custom gate:',err.message)}})}catch(err){console.warn('Custom gate library unavailable:',err.message)}}
+window.addEventListener('message',event=>{
+  if(event.source!==window.parent||event.origin!==location.origin)return;
+  const d=event.data||{};if(d.type!=='OPENQ_CUSTOM_GATE'||d.protocol!=='quolab.custom-gate'||d.protocolVersion!=='1.0.0')return;
+  try{const result=installCustomGate(d.gate,true);if(d.gate.qubits===2&&circuit.qubits<2)circuit.qubits=2;buildPalette();renderCircuit();updateCircuitInfo();updateCodeFromCircuit();
+    window.parent.postMessage({type:'OPENQ_CUSTOM_GATE_RESPONSE',requestId:d.requestId,ok:true,gateId:result.id,message:'Custom unitary added to Architect palette and emitted as Qiskit qc.unitary().'},location.origin);
+  }catch(err){window.parent.postMessage({type:'OPENQ_CUSTOM_GATE_RESPONSE',requestId:d.requestId,ok:false,message:err.message||'Custom gate rejected.'},location.origin)}
+});
+
 // ═══════════════════════════════════════════════════════════
 // placeGate() — versión corregida: añade puerta y normaliza
 // ═══════════════════════════════════════════════════════════
@@ -1029,6 +1061,9 @@ function renderCircuit() {
         svg += '<circle cx="24" cy="' + controlY + '" r="8" fill="' + gCol + '" stroke="rgba(255,255,255,.9)" stroke-width="1.5"/><circle cx="24" cy="' + targetY + '" r="8" fill="' + gCol + '" stroke="rgba(255,255,255,.9)" stroke-width="1.5"/>';
       } else if (g.id === 'SWAP') {
         for (const y of [controlY, targetY]) svg += '<path d="M16 ' + (y-6) + ' L32 ' + (y+6) + ' M32 ' + (y-6) + ' L16 ' + (y+6) + '" stroke="' + gCol + '" stroke-width="2"/>';
+      } else if (g.def?.customGate) {
+        svg += '<rect x="7" y="' + (controlY-10) + '" width="34" height="20" rx="4" fill="' + gCol + '" stroke="#b9f5ff" stroke-width="1"/><text x="24" y="' + (controlY+3) + '" text-anchor="middle" fill="#fff" font-size="9" font-family="monospace">U</text>';
+        svg += '<circle cx="24" cy="' + targetY + '" r="5" fill="' + gCol + '" stroke="#b9f5ff" stroke-width="1"/>';
       }
       html += '<div style="position:absolute; left:' + left + 'px; top:' + topY + 'px;"><svg width="48" height="' + (ROW_HEIGHT + height) + '" viewBox="0 0 48 ' + (ROW_HEIGHT + height) + '" style="cursor:pointer;" onclick="removeGate(' + g.uid + ')">' + svg + '</svg></div>';
     } else {
@@ -3316,6 +3351,7 @@ function init() {
         if (pyodide) injectIgnoredAttrsIntoPython(pyodide);
     });
     for (let i = 0; i < circuit.qubits; i++) blochStates[i] = { theta: 0, phi: 0 };
+    loadStoredCustomGates();
     buildPalette();
     renderCircuit();
     updateCircuitInfo();
