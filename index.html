@@ -706,6 +706,15 @@ body::before{content:'';position:fixed;inset:0;
     </div>
   </div>
 
+  <div class="screen" id="screen-gate-designer">
+    <div class="screen-hdr">
+      <button class="btn-back" onclick="QuOLabNexus.nav('home')">← MENU</button>
+      <div class="screen-title">⚛ QUANTUM GATE DESIGNER</div>
+      <div style="font-size:.58rem;color:var(--mu);font-family:var(--mono);">CUSTOM UNITARY WORKBENCH</div>
+    </div>
+    <div class="module-iframe-wrap" id="gate-designer-wrap"></div>
+  </div>
+
   <div class="screen" id="screen-library">
     <div class="screen-hdr">
       <button class="btn-back" onclick="QuOLabNexus.nav('home')">← MENU</button>
@@ -1082,6 +1091,7 @@ class QuOLabNexusConfigSyncReader {
     help:           'quolab-nexus-help.html',
     'quantum-puzzle':'quolab-nexus-quantum-puzzle.html',
     'data-analyzer':'quolab-nexus-data-analyzer.html',
+    'gate-designer':'quolab-nexus-gate-designer.html',
   };
 
   let curUser = null;
@@ -1211,6 +1221,52 @@ class QuOLabNexusConfigSyncReader {
     if (window.QuOLabNexusCore) Object.assign(d, window.QuOLabNexusCore.normalizeIncoming(d));
     else if (typeof d.type === 'string' && /^(?:NEXUS|QCOL)_/.test(d.type)) d.type = 'OPENQ_' + d.type.replace(/^(?:NEXUS|QCOL)_/, '');
     if (typeof d.key === 'string' && d.key.indexOf('qcol_') === 0) d.key = 'openq_' + d.key.slice(5);
+
+    // Custom quantum-gate handoff: only accept messages from the registered same-origin iframe.
+    if (d.type === 'OPENQ_CUSTOM_GATE_NOTEBOOK') {
+      const gateFrame = iframes['gate-designer'];
+      if (!gateFrame || e.source !== gateFrame.contentWindow || e.origin !== location.origin) return;
+      const notebook = iframes['architect-pro'];
+      if (!notebook || !notebook.contentWindow || d.protocol !== 'quolab.custom-gate' || d.protocolVersion !== '1.0.0' || typeof d.code !== 'string' || d.code.length > 30000) {
+        gateFrame.contentWindow.postMessage({type:'OPENQ_CUSTOM_GATE_NOTEBOOK_RESPONSE',requestId:d.requestId,ok:false,message:'Open Quantum Notebook first, then send the Qiskit snippet again.'},location.origin);
+        return;
+      }
+      notebook.contentWindow.postMessage({type:'OPENQ_CUSTOM_GATE_NOTEBOOK',requestId:d.requestId,code:d.code,name:String(d.gate && d.gate.name || 'Custom gate').slice(0,100)},location.origin);
+      return;
+    }
+    if (d.type === 'OPENQ_CUSTOM_GATE_RESPONSE') {
+      const architect = iframes['architect'], gateFrame = iframes['gate-designer'];
+      if (architect && e.source === architect.contentWindow && e.origin === location.origin && gateFrame) gateFrame.contentWindow.postMessage(d,location.origin);
+      return;
+    }
+    if (d.type === 'OPENQ_CUSTOM_GATE_NOTEBOOK_RESPONSE') {
+      const notebook = iframes['architect-pro'], gateFrame = iframes['gate-designer'];
+      if (notebook && e.source === notebook.contentWindow && e.origin === location.origin && gateFrame) gateFrame.contentWindow.postMessage(d,location.origin);
+      return;
+    }
+    if (d.type === 'OPENQ_CUSTOM_GATE') {
+      const gateFrame = iframes['gate-designer'];
+      if (!gateFrame || e.source !== gateFrame.contentWindow || e.origin !== location.origin) return;
+      const g = d.gate;
+      const validEnvelope = d.protocol === 'quolab.custom-gate' && d.protocolVersion === '1.0.0'
+        && typeof d.requestId === 'string' && g && g.schema === 'quolab.custom-gate'
+        && g.schemaVersion === '1.0.0' && [1,2].includes(Number(g.qubits))
+        && g.matrix && g.matrix.basisOrder === 'q0-lsb'
+        && Array.isArray(g.matrix.data) && g.matrix.data.length === 2 ** Number(g.qubits)
+        && g.matrix.data.every(row => Array.isArray(row) && row.length === 2 ** Number(g.qubits)
+          && row.every(z => z && Number.isFinite(z.re) && Number.isFinite(z.im)));
+      const architect = iframes['architect'];
+      if (!validEnvelope) {
+        gateFrame.contentWindow.postMessage({type:'OPENQ_CUSTOM_GATE_RESPONSE',requestId:d.requestId,ok:false,message:'Invalid custom-gate message or matrix structure.'},location.origin);
+        return;
+      }
+      if (!architect || !architect.contentWindow) {
+        gateFrame.contentWindow.postMessage({type:'OPENQ_CUSTOM_GATE_RESPONSE',requestId:d.requestId,ok:false,message:'Open Quantum Architect once, then return here and send the gate again.'},location.origin);
+        return;
+      }
+      architect.contentWindow.postMessage(d,location.origin);
+      return;
+    }
 
     // Enrutador central: las órdenes y respuestas de App Studio atraviesan index.html.
     if (d.type === 'OPENQ_STUDIO_COMMAND' || d.type === 'NEXUS_STUDIO_COMMAND') {
@@ -1864,6 +1920,13 @@ class QuOLabNexusConfigSyncReader {
         title:'⚙️ QUANTUM OPEN LAB', badge:'badge-new', badgeTxt:'QUANTUM',
         desc:'Visual quantum circuit editor with real Python execution (Qiskit). Design and simulate quantum circuits, save them to your account.',
         delay:.1, show:true,
+      },
+      {
+        screen:'gate-designer',
+        icon:`<svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="3" stroke="#00ccff" stroke-width="1.5"/><path d="M7 7h10M7 12h10M7 17h10" stroke="#00ffdd" stroke-width="1.4"/><circle cx="8" cy="7" r="1.5" fill="#00ccff"/><circle cx="16" cy="17" r="1.5" fill="#00ffdd"/></svg>`,
+        title:'QUANTUM GATE DESIGNER', badge:'badge-new', badgeTxt:'DESIGN',
+        desc:'Design custom unitary quantum gates, validate matrices, compose small circuits and export compatible Qiskit definitions.',
+        delay:.13, show:true,
       },
       {
         screen:'architect-pro',

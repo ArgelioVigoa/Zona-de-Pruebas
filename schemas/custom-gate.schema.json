@@ -1,0 +1,21 @@
+{
+ "$schema":"https://json-schema.org/draft/2020-12/schema",
+ "$id":"https://quolab-nexus.local/schemas/custom-gate-1.0.0.json",
+ "title":"QuOLab Custom Quantum Gate","type":"object","additionalProperties":false,
+ "required":["schema","schemaVersion","id","name","symbol","qubits","matrix","validation"],
+ "properties":{
+  "schema":{"const":"quolab.custom-gate"},"schemaVersion":{"const":"1.0.0"},
+  "id":{"type":"string","minLength":1,"maxLength":120},"name":{"type":"string","minLength":1,"maxLength":100},
+  "symbol":{"type":"string","minLength":1,"maxLength":12},"description":{"type":"string","maxLength":500},
+  "qubits":{"type":"integer","enum":[1,2]},"parameterized":{"type":"boolean"},
+  "matrix":{"type":"object","required":["representation","basisOrder","data"],"properties":{
+   "representation":{"const":"complex-pairs"},"basisOrder":{"const":"q0-lsb"},
+   "data":{"type":"array","minItems":2,"maxItems":4,"items":{"type":"array","minItems":2,"maxItems":4,"items":{
+    "type":"object","required":["re","im"],"properties":{"re":{"type":"number"},"im":{"type":"number"}},"additionalProperties":false
+   }}}
+  },"additionalProperties":false},
+  "construction":{"type":"object"},"validation":{"type":"object","required":["unitary","maxError","tolerance"],"properties":{
+   "unitary":{"type":"boolean"},"maxError":{"type":"number","minimum":0},"tolerance":{"type":"number","exclusiveMinimum":0}
+  }},"compatibility":{"type":"object"}
+ }
+}

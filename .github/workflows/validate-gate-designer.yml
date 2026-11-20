@@ -1,0 +1,77 @@
+name: Validate Quantum Gate Designer
+on:
+  push:
+    branches: ["feature/quantum-gate-designer"]
+  pull_request:
+    branches: ["web-preview"]
+    paths:
+      - "index.html"
+      - "quolab-nexus-gate-designer.html"
+      - "quolab-nexus-architect.html"
+      - "quolab-nexus-quantum-notebook.html"
+      - "quolab-nexus-tool-connector.js"
+      - "schemas/**"
+      - "docs/CUSTOM_GATE_PROTOCOL.md"
+      - "tests/**"
+      - ".github/workflows/validate-gate-designer.yml"
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Validate schema and matrix regression cases
+        run: |
+          node -e "JSON.parse(require('fs').readFileSync('schemas/custom-gate.schema.json','utf8')); console.log('JSON schema syntax OK')"
+          node tests/custom-gate-math.test.js
+      - name: Check all inline JavaScript
+        run: |
+          python - <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+          import subprocess, tempfile
+          class Scripts(HTMLParser):
+              def __init__(self):
+                  super().__init__(); self.active=False; self.skip=False; self.parts=[]; self.current=[]
+              def handle_starttag(self, tag, attrs):
+                  if tag.lower()=='script':
+                      self.active=True
+                      a=dict(attrs); self.skip=a.get('type','').lower() in ('importmap','application/json')
+                      self.current=[]
+              def handle_data(self, data):
+                  if self.active and not self.skip: self.current.append(data)
+              def handle_endtag(self, tag):
+                  if tag.lower()=='script' and self.active:
+                      if not self.skip and ''.join(self.current).strip(): self.parts.append(''.join(self.current))
+                      self.active=False; self.skip=False
+          count=0
+          for path in Path('.').glob('*.html'):
+              parser=Scripts(); parser.feed(path.read_text(encoding='utf-8'))
+              for body in parser.parts:
+                  with tempfile.NamedTemporaryFile('w',suffix='.js',encoding='utf-8') as f:
+                      f.write(body); f.flush(); subprocess.run(['node','--check',f.name],check=True)
+                  count+=1
+          print(f'Inline JavaScript syntax OK: {count} blocks')
+          PY
+      - name: Check integration contracts
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          index=Path('index.html').read_text(encoding='utf-8')
+          gate=Path('quolab-nexus-gate-designer.html').read_text(encoding='utf-8')
+          arch=Path('quolab-nexus-architect.html').read_text(encoding='utf-8')
+          nb=Path('quolab-nexus-quantum-notebook.html').read_text(encoding='utf-8')
+          assert "'gate-designer':'quolab-nexus-gate-designer.html'" in index
+          assert "OPENQ_CUSTOM_GATE" in index and "event.source" in index
+          assert "validateIncomingCustomGate" in arch and "qc.unitary" in arch
+          assert "OPENQ_CUSTOM_GATE_NOTEBOOK" in nb
+          assert "Validate unitarity" in gate and "UnitaryGate" in gate
+          assert "Test on Qiskit backend" in gate and "QGATE_BACKEND_TEST_MAX_ERROR=" in gate
+          assert "Operator(qc).data" in gate and "/run/predict" in gate and "/health/predict" in gate
+          assert "openq_colab_url" in gate and "Backend test failed" in gate
+          print("Gate Designer integration contracts OK")
+          PY

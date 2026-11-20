@@ -1,0 +1,76 @@
+name: Validate QuoLab preview
+
+on:
+  push:
+    branches: ["stability-fixes"]
+  pull_request:
+    branches: ["web-preview"]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check Python syntax
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          for path in Path(".").glob("*.py"):
+              compile(path.read_text(encoding="utf-8"), str(path), "exec")
+              print("Python OK:", path)
+          PY
+      - name: Check JavaScript files and inline HTML scripts
+        run: |
+          set -euo pipefail
+          for file in ./*.js; do
+            [ -f "$file" ] || continue
+            node --check "$file"
+            echo "JavaScript OK: $file"
+          done
+          python - <<'PY'
+          from pathlib import Path
+          import re, subprocess, tempfile
+          checked = 0
+          for html in Path(".").glob("*.html"):
+              source = html.read_text(encoding="utf-8")
+              for index, match in enumerate(re.finditer(r"<script\\b([^>]*)>([\\s\\S]*?)</script\\s*>", source, re.I)):
+                  attrs, body = match.group(1), match.group(2)
+                  if re.search(r"\\bsrc\\s*=", attrs, re.I):
+                      continue
+                  kind = re.search(r"""\\btype\\s*=\\s*["']([^"']+)["']""", attrs, re.I)
+                  if kind and kind.group(1).lower() not in ("text/javascript", "application/javascript", "module"):
+                      continue
+                  if not body.strip():
+                      continue
+                  with tempfile.NamedTemporaryFile("w", suffix=".js", encoding="utf-8") as tmp:
+                      tmp.write(body)
+                      tmp.flush()
+                      subprocess.run(["node", "--check", tmp.name], check=True)
+                  checked += 1
+          print(f"Inline JavaScript OK: {checked} scripts")
+          PY
+      - name: Check critical quantum circuit invariants
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          architect = Path("quolab-nexus-architect.html").read_text(encoding="utf-8")
+          notebook = Path("quolab-nexus-quantum-notebook.html").read_text(encoding="utf-8")
+          assert "q: qubit, q2" in architect, "Two-qubit operand order is not preserved"
+          assert "q: qCtrl, q2: qSwap1, q3: qSwap2" in architect, "Three-qubit operand order is not preserved"
+          assert "params: g.params || []" in architect, "Notebook handoff drops gate parameters"
+          assert "params[0]??'np.pi/4'" in notebook, "Notebook rotation parameter fallback missing"
+          assert "def.code.replace(/\\{angle\\}/g,angle)" in notebook, "Notebook does not export the preserved rotation angle"
+          print("Quantum circuit invariants OK")
+          PY

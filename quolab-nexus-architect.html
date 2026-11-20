@@ -798,6 +798,38 @@ function onWireDrop(e, qubit) {
 
 function findGateDef(id) { for (const cat of Object.values(GATES)) { const g = cat.find(g => g.id === id); if (g) return g; } return null; }
 
+const CUSTOM_GATE_STORE = 'quolab_custom_gates_v1';
+function validateIncomingCustomGate(g) {
+  if (!g || g.schema !== 'quolab.custom-gate' || g.schemaVersion !== '1.0.0' || ![1,2].includes(Number(g.qubits))) throw new Error('Unsupported custom-gate schema or qubit count.');
+  if (!g.matrix || g.matrix.basisOrder !== 'q0-lsb' || !Array.isArray(g.matrix.data)) throw new Error('Unsupported matrix convention.');
+  const d=2**Number(g.qubits),m=g.matrix.data;
+  if(m.length!==d||m.some(row=>!Array.isArray(row)||row.length!==d))throw new Error('Matrix dimensions do not match qubit count.');
+  if(!/^[A-Za-z0-9_+-]{1,12}$/.test(String(g.symbol||'')))throw new Error('Gate symbol must use letters, numbers, underscore, + or - (max 12).');
+  if(m.some(row=>row.some(z=>!z||!Number.isFinite(z.re)||!Number.isFinite(z.im))))throw new Error('Matrix contains invalid complex values.');
+  const cm=(a,b)=>[a[0]*b[0]-a[1]*b[1],a[0]*b[1]+a[1]*b[0]],mag=a=>Math.hypot(a[0],a[1]);let err=0;
+  for(let i=0;i<d;i++)for(let j=0;j<d;j++){let sum=[0,0];for(let k=0;k<d;k++){const z=cm([m[k][i].re,-m[k][i].im],[m[k][j].re,m[k][j].im]);sum=[sum[0]+z[0],sum[1]+z[1]];}err=Math.max(err,mag([sum[0]-(i===j?1:0),sum[1]]));}
+  const tol=Number(g.validation&&g.validation.tolerance||1e-10);if(!(err<=tol))throw new Error('Independent unitarity check failed; max error '+err);
+  return {d:d,maxError:err};
+}
+function customGatePythonMatrix(g){return '['+g.matrix.data.map(row=>'['+row.map(z=>'('+Number(z.re).toPrecision(16)+(z.im<0?'':' + ')+Number(z.im).toPrecision(16)+'j)').join(', ')+']').join(',\n')+']';}
+function installCustomGate(g,persist=true){
+  const v=validateIncomingCustomGate(g),id='QG_'+String(g.id).replace(/[^A-Za-z0-9_]/g,'_').slice(0,48);
+  const code='qc.unitary(np.array('+customGatePythonMatrix(g)+', dtype=complex), [{q}'+(v.d===4?', {q2}':'')+'])';
+  const def={id:id,sym:g.symbol,bg:'#07556a',glow:'#00ccff',desc:String(g.name||'Custom unitary').slice(0,80),code:code,customGate:true,multi:v.d===4};
+  ['1q','2q'].forEach(cat=>{GATES[cat]=GATES[cat].filter(x=>x.id!==id)});
+  GATES[v.d===2?'1q':'2q'].push(def);
+  if(persist){let all=[];try{all=JSON.parse(localStorage.getItem(CUSTOM_GATE_STORE)||'[]')}catch(_){}all=all.filter(x=>x.id!==g.id);all.unshift(g);localStorage.setItem(CUSTOM_GATE_STORE,JSON.stringify(all.slice(0,80)));}
+  return {id:id,def:def};
+}
+function loadStoredCustomGates(){try{const all=JSON.parse(localStorage.getItem(CUSTOM_GATE_STORE)||'[]');all.forEach(g=>{try{installCustomGate(g,false)}catch(err){console.warn('Skipped invalid custom gate:',err.message)}})}catch(err){console.warn('Custom gate library unavailable:',err.message)}}
+window.addEventListener('message',event=>{
+  if(event.source!==window.parent||event.origin!==location.origin)return;
+  const d=event.data||{};if(d.type!=='OPENQ_CUSTOM_GATE'||d.protocol!=='quolab.custom-gate'||d.protocolVersion!=='1.0.0')return;
+  try{const result=installCustomGate(d.gate,true);while(d.gate.qubits===2&&circuit.qubits<2)addQubit();buildPalette();renderCircuit();updateCircuitInfo();updateCodeFromCircuit();
+    window.parent.postMessage({type:'OPENQ_CUSTOM_GATE_RESPONSE',requestId:d.requestId,ok:true,gateId:result.id,message:'Custom unitary added to Architect palette and emitted as Qiskit qc.unitary().'},location.origin);
+  }catch(err){window.parent.postMessage({type:'OPENQ_CUSTOM_GATE_RESPONSE',requestId:d.requestId,ok:false,message:err.message||'Custom gate rejected.'},location.origin)}
+});
+
 // ═══════════════════════════════════════════════════════════
 // placeGate() — versión corregida: añade puerta y normaliza
 // ═══════════════════════════════════════════════════════════
@@ -824,16 +856,19 @@ function placeGate(gateId, qubit) {
     if (qCtrl === qSwap1) qSwap1 = (qSwap1 + 1) % circuit.qubits;
     if (qCtrl === qSwap2) qSwap2 = (qSwap2 + 1) % circuit.qubits;
     if (qSwap1 === qSwap2) qSwap2 = (qSwap2 + 1) % circuit.qubits;
-    const qs = [qCtrl, qSwap1, qSwap2].sort((a, b) => a - b);
+    const qs = [qCtrl, qSwap1, qSwap2];
     if (circuit.gates.some(g => g.id === 'M' && !g.autoMeasurement && qs.includes(g.q))) { isUpdatingFromCircuit = false; notify('❌ A gate cannot be placed after a measurement.'); return; }
     removeAutoMeasurementsForWires(qs);
-    circuit.gates.push({ id: gateId, q: qs[0], q2: qs[1], q3: qs[2], def: def, uid: nextId++ });
+    // Preserve Qiskit operand order: CCX controls are q/q2 and target is q3;
+    // CSWAP control is q and its two swap targets are q2/q3.
+    circuit.gates.push({ id: gateId, q: qCtrl, q2: qSwap1, q3: qSwap2, def: def, uid: nextId++ });
   } else if (def.multi) {
     if (circuit.qubits < 2) { notify('You need at least 2 qubits'); isUpdatingFromCircuit = false; return; }
     const q2 = qubit + 1 < circuit.qubits ? qubit + 1 : qubit - 1;
-    if (circuit.gates.some(g => g.id === 'M' && !g.autoMeasurement && (g.q === qubit || g.q === q2))) { isUpdatingFromCircuit = false; notify('❌ A gate cannot be placed after a measurement.'); return; }
+    if (circuit.gates.some(g => g.id === 'M' && !g.autoMeasurement && (g.q === qubit || g.q2 === qubit || g.q === q2 || g.q2 === q2))) { isUpdatingFromCircuit = false; notify('❌ A gate cannot be placed after a measurement.'); return; }
     removeAutoMeasurementsForWires([qubit, q2]);
-    circuit.gates.push({ id: gateId, q: Math.min(qubit, q2), q2: Math.max(qubit, q2), def: def, uid: nextId++ });
+    // Preserve operand order: for CX, q is the control and q2 is the target.
+    circuit.gates.push({ id: gateId, q: qubit, q2, def: def, uid: nextId++ });
   } else {
     if (gateId === 'M') {
       if (!circuit.gates.some(g => g.id !== 'M' && (g.q === qubit || g.q2 === qubit || g.q3 === qubit))) {
@@ -995,60 +1030,42 @@ function renderCircuit() {
       html += `<div class="qcol-block" title="${escapeHtml(g.block.tip)}" aria-label="${escapeHtml(g.block.tip)}" tabindex="0" role="button" onclick="nexusBlockInfo(${g.uid})"
         style="position:absolute;left:${left}px;top:${g.q * ROW_HEIGHT + 4}px;width:${bw}px;height:${bh}px;box-sizing:border-box;background:linear-gradient(135deg,#4a148c,#8e24aa);border:1.5px solid #ce93d8;border-radius:8px;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;font:700 12px monospace;text-align:center;cursor:help;overflow:hidden;padding:2px;">${escapeHtml(g.block.label)}<span style="font-weight:400;font-size:9px;opacity:.85;">${escapeHtml(g.block.sub)}</span></div>`;
     } else if (g.q3 !== undefined) {
-      const qs = [g.q, g.q2, g.q3].sort((a, b) => a - b);
-      const topY = qs[0] * ROW_HEIGHT;
-      const height = (qs[2] - qs[0]) * ROW_HEIGHT;
+      const qs = [g.q, g.q2, g.q3];
+      const minQ = Math.min(...qs), maxQ = Math.max(...qs);
+      const topY = minQ * ROW_HEIGHT, height = (maxQ - minQ) * ROW_HEIGHT;
+      const y1 = (g.q - minQ) * ROW_HEIGHT + ROW_HEIGHT / 2;
+      const y2 = (g.q2 - minQ) * ROW_HEIGHT + ROW_HEIGHT / 2;
+      const y3 = (g.q3 - minQ) * ROW_HEIGHT + ROW_HEIGHT / 2;
       const gCol = g.def?.bg || '#0088ff';
-      let svg = '';
+      let svg = '<line x1="26" y1="0" x2="26" y2="' + (ROW_HEIGHT + height) + '" stroke="' + gCol + '" stroke-width="2.5"/>';
       if (g.id === 'CCX') {
-        svg = `<svg width="52" height="${ROW_HEIGHT + height}" viewBox="0 0 52 ${ROW_HEIGHT + height}" style="cursor:pointer;" onclick="removeGate(${g.uid})">
-          <line x1="26" y1="0" x2="26" y2="${ROW_HEIGHT + height}" stroke="${gCol}" stroke-width="2.5"/>
-          <circle cx="26" cy="${ROW_HEIGHT / 2}" r="8" fill="${gCol}" stroke="rgba(255,255,255,.9)" stroke-width="1.5"/>
-          <circle cx="26" cy="${ROW_HEIGHT / 2 + (qs[1] - qs[0]) * ROW_HEIGHT}" r="8" fill="${gCol}" stroke="rgba(255,255,255,.9)" stroke-width="1.5"/>
-          <circle cx="26" cy="${ROW_HEIGHT / 2 + height}" r="14" fill="none" stroke="${gCol}" stroke-width="2.5"/>
-          <line x1="18" y1="${ROW_HEIGHT / 2 + height}" x2="34" y2="${ROW_HEIGHT / 2 + height}" stroke="${gCol}" stroke-width="2"/>
-          <line x1="26" y1="${ROW_HEIGHT / 2 + height - 10}" x2="26" y2="${ROW_HEIGHT / 2 + height + 10}" stroke="${gCol}" stroke-width="2"/>
-        </svg>`;
+        for (const y of [y1, y2]) svg += '<circle cx="26" cy="' + y + '" r="8" fill="' + gCol + '" stroke="rgba(255,255,255,.9)" stroke-width="1.5"/>';
+        svg += '<circle cx="26" cy="' + y3 + '" r="14" fill="none" stroke="' + gCol + '" stroke-width="2.5"/><path d="M18 ' + y3 + ' H34 M26 ' + (y3-10) + ' V' + (y3+10) + '" stroke="' + gCol + '" stroke-width="2"/>';
       } else if (g.id === 'CSW') {
-        svg = `<svg width="52" height="${ROW_HEIGHT + height}" viewBox="0 0 52 ${ROW_HEIGHT + height}" style="cursor:pointer;" onclick="removeGate(${g.uid})">
-          <line x1="26" y1="0" x2="26" y2="${ROW_HEIGHT + height}" stroke="${gCol}" stroke-width="2.5"/>
-          <circle cx="26" cy="${ROW_HEIGHT / 2}" r="8" fill="${gCol}" stroke="rgba(255,255,255,.9)" stroke-width="1.5"/>
-          <line x1="18" y1="${ROW_HEIGHT / 2 + (qs[1] - qs[0]) * ROW_HEIGHT - 6}" x2="34" y2="${ROW_HEIGHT / 2 + (qs[1] - qs[0]) * ROW_HEIGHT + 6}" stroke="${gCol}" stroke-width="2"/>
-          <line x1="34" y1="${ROW_HEIGHT / 2 + (qs[1] - qs[0]) * ROW_HEIGHT - 6}" x2="18" y2="${ROW_HEIGHT / 2 + (qs[1] - qs[0]) * ROW_HEIGHT + 6}" stroke="${gCol}" stroke-width="2"/>
-          <line x1="18" y1="${ROW_HEIGHT / 2 + height - 6}" x2="34" y2="${ROW_HEIGHT / 2 + height + 6}" stroke="${gCol}" stroke-width="2"/>
-          <line x1="34" y1="${ROW_HEIGHT / 2 + height - 6}" x2="18" y2="${ROW_HEIGHT / 2 + height + 6}" stroke="${gCol}" stroke-width="2"/>
-        </svg>`;
+        svg += '<circle cx="26" cy="' + y1 + '" r="8" fill="' + gCol + '" stroke="rgba(255,255,255,.9)" stroke-width="1.5"/>';
+        for (const y of [y2, y3]) svg += '<path d="M18 ' + (y-6) + ' L34 ' + (y+6) + ' M34 ' + (y-6) + ' L18 ' + (y+6) + '" stroke="' + gCol + '" stroke-width="2"/>';
       }
-      html += `<div style="position:absolute; left:${left}px; top:${topY}px;">${svg}</div>`;
+      html += '<div style="position:absolute; left:' + left + 'px; top:' + topY + 'px;"><svg width="52" height="' + (ROW_HEIGHT + height) + '" viewBox="0 0 52 ' + (ROW_HEIGHT + height) + '" style="cursor:pointer;" onclick="removeGate(' + g.uid + ')">' + svg + '</svg></div>';
     } else if (g.q2 !== undefined) {
-      const topY = g.q * ROW_HEIGHT;
-      const height = (g.q2 - g.q) * ROW_HEIGHT;
+      const minQ = Math.min(g.q, g.q2), maxQ = Math.max(g.q, g.q2);
+      const topY = minQ * ROW_HEIGHT;
+      const height = (maxQ - minQ) * ROW_HEIGHT;
+      const controlY = (g.q - minQ) * ROW_HEIGHT + ROW_HEIGHT / 2;
+      const targetY = (g.q2 - minQ) * ROW_HEIGHT + ROW_HEIGHT / 2;
       const gCol = g.def?.bg || '#0088ff';
-      let svg = '';
+      let svg = '<line x1="24" y1="0" x2="24" y2="' + (ROW_HEIGHT + height) + '" stroke="' + gCol + '" stroke-width="2.5"/>';
       if (g.id === 'CX') {
-        svg = `<svg width="48" height="${ROW_HEIGHT + height}" viewBox="0 0 48 ${ROW_HEIGHT + height}" style="cursor:pointer;" onclick="removeGate(${g.uid})">
-          <line x1="24" y1="0" x2="24" y2="${ROW_HEIGHT + height}" stroke="${gCol}" stroke-width="2.5"/>
-          <circle cx="24" cy="${ROW_HEIGHT / 2}" r="8" fill="${gCol}" stroke="rgba(255,255,255,.9)" stroke-width="1.5"/>
-          <circle cx="24" cy="${ROW_HEIGHT / 2 + height}" r="14" fill="none" stroke="${gCol}" stroke-width="2.5"/>
-          <line x1="16" y1="${ROW_HEIGHT / 2 + height}" x2="32" y2="${ROW_HEIGHT / 2 + height}" stroke="${gCol}" stroke-width="2"/>
-          <line x1="24" y1="${ROW_HEIGHT / 2 + height - 10}" x2="24" y2="${ROW_HEIGHT / 2 + height + 10}" stroke="${gCol}" stroke-width="2"/>
-        </svg>`;
+        svg += '<circle cx="24" cy="' + controlY + '" r="8" fill="' + gCol + '" stroke="rgba(255,255,255,.9)" stroke-width="1.5"/>';
+        svg += '<circle cx="24" cy="' + targetY + '" r="14" fill="none" stroke="' + gCol + '" stroke-width="2.5"/><path d="M16 ' + targetY + ' H32 M24 ' + (targetY-10) + ' V' + (targetY+10) + '" stroke="' + gCol + '" stroke-width="2"/>';
       } else if (g.id === 'CZ') {
-        svg = `<svg width="48" height="${ROW_HEIGHT + height}" viewBox="0 0 48 ${ROW_HEIGHT + height}" style="cursor:pointer;" onclick="removeGate(${g.uid})">
-          <line x1="24" y1="0" x2="24" y2="${ROW_HEIGHT + height}" stroke="${gCol}" stroke-width="2.5"/>
-          <circle cx="24" cy="${ROW_HEIGHT / 2}" r="8" fill="${gCol}" stroke="rgba(255,255,255,.9)" stroke-width="1.5"/>
-          <circle cx="24" cy="${ROW_HEIGHT / 2 + height}" r="8" fill="${gCol}" stroke="rgba(255,255,255,.9)" stroke-width="1.5"/>
-        </svg>`;
+        svg += '<circle cx="24" cy="' + controlY + '" r="8" fill="' + gCol + '" stroke="rgba(255,255,255,.9)" stroke-width="1.5"/><circle cx="24" cy="' + targetY + '" r="8" fill="' + gCol + '" stroke="rgba(255,255,255,.9)" stroke-width="1.5"/>';
       } else if (g.id === 'SWAP') {
-        svg = `<svg width="48" height="${ROW_HEIGHT + height}" viewBox="0 0 48 ${ROW_HEIGHT + height}" style="cursor:pointer;" onclick="removeGate(${g.uid})">
-          <line x1="24" y1="0" x2="24" y2="${ROW_HEIGHT + height}" stroke="${gCol}" stroke-width="2.5"/>
-          <line x1="16" y1="${ROW_HEIGHT / 2 - 6}" x2="32" y2="${ROW_HEIGHT / 2 + 6}" stroke="${gCol}" stroke-width="2"/>
-          <line x1="32" y1="${ROW_HEIGHT / 2 - 6}" x2="16" y2="${ROW_HEIGHT / 2 + 6}" stroke="${gCol}" stroke-width="2"/>
-          <line x1="16" y1="${ROW_HEIGHT / 2 + height - 6}" x2="32" y2="${ROW_HEIGHT / 2 + height + 6}" stroke="${gCol}" stroke-width="2"/>
-          <line x1="32" y1="${ROW_HEIGHT / 2 + height - 6}" x2="16" y2="${ROW_HEIGHT / 2 + height + 6}" stroke="${gCol}" stroke-width="2"/>
-        </svg>`;
+        for (const y of [controlY, targetY]) svg += '<path d="M16 ' + (y-6) + ' L32 ' + (y+6) + ' M32 ' + (y-6) + ' L16 ' + (y+6) + '" stroke="' + gCol + '" stroke-width="2"/>';
+      } else if (g.def?.customGate) {
+        svg += '<rect x="7" y="' + (controlY-10) + '" width="34" height="20" rx="4" fill="' + gCol + '" stroke="#b9f5ff" stroke-width="1"/><text x="24" y="' + (controlY+3) + '" text-anchor="middle" fill="#fff" font-size="9" font-family="monospace">U</text>';
+        svg += '<circle cx="24" cy="' + targetY + '" r="5" fill="' + gCol + '" stroke="#b9f5ff" stroke-width="1"/>';
       }
-      html += `<div style="position:absolute; left:${left}px; top:${topY}px;">${svg}</div>`;
+      html += '<div style="position:absolute; left:' + left + 'px; top:' + topY + 'px;"><svg width="48" height="' + (ROW_HEIGHT + height) + '" viewBox="0 0 48 ' + (ROW_HEIGHT + height) + '" style="cursor:pointer;" onclick="removeGate(' + g.uid + ')">' + svg + '</svg></div>';
     } else {
       const yPos = g.q * ROW_HEIGHT;
       html += `<div class="placed-gate" draggable="true" 
@@ -1442,29 +1459,29 @@ class QuantumCircuit:
     def tdg(self, q, **kw): return self._add('t', [q], None, 'tdg')
     def sx(self, q, **kw): return self._add('sx', [q])
     def sxdg(self, q, **kw): return self._add('sx', [q], None, 'sxdg')
-    def id(self, q, **kw): return self._add('h', [q], None, 'id')
-    def reset(self, q, **kw): return self._add('x', [q], None, 'reset')
+    def id(self, q, **kw): return self._add('id', [q])
+    def reset(self, q, **kw): return self._add('reset', [q])
 
     def rx(self, theta, q, **kw): return self._add('rx', [q], [theta])
     def ry(self, theta, q, **kw): return self._add('ry', [q], [theta])
     def rz(self, theta, q, **kw): return self._add('rz', [q], [theta])
-    def p(self, theta, q, **kw): return self._add('rz', [q], [theta], 'p')
-    def r(self, theta, phi, q, **kw): return self._add('rx', [q], [theta], 'r')
-    def u(self, theta, phi, lam, q, **kw): return self._add('rx', [q], [theta], 'u')
-    def u1(self, theta, q, **kw): return self._add('rz', [q], [theta], 'u1')
-    def u2(self, phi, lam, q, **kw): return self._add('ry', [q], [phi], 'u2')
-    def u3(self, theta, phi, lam, q, **kw): return self._add('rx', [q], [theta], 'u3')
+    def p(self, theta, q, **kw): return self._add('p', [q], [theta])
+    def r(self, theta, phi, q, **kw): return self._add('r', [q], [theta, phi])
+    def u(self, theta, phi, lam, q, **kw): return self._add('u', [q], [theta, phi, lam])
+    def u1(self, theta, q, **kw): return self._add('u1', [q], [theta])
+    def u2(self, phi, lam, q, **kw): return self._add('u2', [q], [phi, lam])
+    def u3(self, theta, phi, lam, q, **kw): return self._add('u3', [q], [theta, phi, lam])
 
     def cx(self, c, t, **kw): return self._add('cx', [c, t])
     def cnot(self, c, t, **kw): return self._add('cx', [c, t])
     def cz(self, c, t, **kw): return self._add('cz', [c, t])
-    def cy(self, c, t, **kw): return self._add('cz', [c, t], None, 'cy')
+    def cy(self, c, t, **kw): return self._add('cy', [c, t])
     def swap(self, a, b, **kw): return self._add('swap', [a, b])
-    def iswap(self, a, b, **kw): return self._add('swap', [a, b], None, 'iswap')
+    def iswap(self, a, b, **kw): return self._add('iswap', [a, b])
     def cp(self, theta, c, t, **kw): return self._add('cp', [c, t], [theta])
-    def crx(self, theta, c, t, **kw): return self._add('cx', [c, t], None, 'crx')
-    def cry(self, theta, c, t, **kw): return self._add('cx', [c, t], None, 'cry')
-    def crz(self, theta, c, t, **kw): return self._add('cx', [c, t], None, 'crz')
+    def crx(self, theta, c, t, **kw): return self._add('crx', [c, t], [theta])
+    def cry(self, theta, c, t, **kw): return self._add('cry', [c, t], [theta])
+    def crz(self, theta, c, t, **kw): return self._add('crz', [c, t], [theta])
     def ecr(self, a, b, **kw): return self._add('cx', [a, b], None, 'ecr')
     def dcx(self, a, b, **kw): return self._add('cx', [a, b], None, 'dcx')
     def rzx(self, theta, a, b, **kw): return self._add('cx', [a, b], None, 'rzx')
@@ -1823,12 +1840,12 @@ async function initPyodide() {
 function mapOpNameToGateId(opName) {
     const map = {
         'h': 'H', 'x': 'X', 'y': 'Y', 'z': 'Z', 's': 'S', 't': 'T', 'sx': 'SX',
-        'rx': 'RX', 'ry': 'RY', 'rz': 'RZ', 'p': 'RZ',
-        'cx': 'CX', 'cz': 'CZ', 'swap': 'SWAP', 'cp': 'CZ',
-        'ccx': 'CCX', 'cswap': 'CSW', 'mcx': 'CCX',
+        'rx': 'RX', 'ry': 'RY', 'rz': 'RZ',
+        'cx': 'CX', 'cz': 'CZ', 'swap': 'SWAP',
+        'ccx': 'CCX', 'cswap': 'CSW',
         'measure': 'M'
     };
-    return map[opName] || 'H';
+    return map[opName] || null;
 }
 
 
@@ -1862,6 +1879,7 @@ const QCOL_PROBE_PY = [
   "            if __op.name in ('barrier', 'delay'):",
   '                continue',
   "            __d = {'n': __op.name, 'q': [__qc.find_bit(__q).index for __q in __ci.qubits]}",
+  "            try: __d['p'] = [str(__p) for __p in __op.params]\n            except Exception: pass",
   "            if __op.name == 'PauliEvolution':",
   "                __info = {'label': 'exp(-iHt)'}",
   '                try:',
@@ -1903,8 +1921,8 @@ function nexusExtractStruct(output) {
 }
 const _BLOCK_DEF = { id: 'BLK', sym: '▦', bg: '#6a1b9a', glow: '#c06bff', desc: 'Composite block', code: '', block: true };
 function mapOpStrict(opName) {
-  const map = { 'h':'H','x':'X','y':'Y','z':'Z','s':'S','t':'T','sx':'SX','rx':'RX','ry':'RY','rz':'RZ','p':'RZ',
-                'cx':'CX','cz':'CZ','swap':'SWAP','cp':'CZ','ccx':'CCX','cswap':'CSW','mcx':'CCX' };
+  const map = { 'h':'H','x':'X','y':'Y','z':'Z','s':'S','t':'T','sx':'SX','rx':'RX','ry':'RY','rz':'RZ',
+                'cx':'CX','cz':'CZ','swap':'SWAP','ccx':'CCX','cswap':'CSW' };
   return map[opName] || null;
 }
 function _blockText(o) {
@@ -1954,11 +1972,14 @@ function nexusOpsToGates(ops) {
       gates.push({ id: 'BLK', q: lo, q2: hi, qs, def: _BLOCK_DEF, uid, block: { label: bt.label, sub: bt.sub, tip: bt.tip, w: o.info ? 3 : 1 } });
       continue;
     }
-    const def = findGateDef(id);
-    if (!def) continue;
-    if (qs.length === 1) gates.push({ id, q: qs[0], def, uid });
-    else if (qs.length === 2) gates.push({ id, q: Math.min(qs[0], qs[1]), q2: Math.max(qs[0], qs[1]), def, uid });
-    else { const so = [...qs].sort((a, b) => a - b); gates.push({ id, q: so[0], q2: so[1], q3: so[2], def, uid }); }
+    const baseDef = findGateDef(id);
+    if (!baseDef) continue;
+    const params = Array.isArray(o.p) ? o.p : [];
+    const def = { ...baseDef };
+    if (['RX','RY','RZ'].includes(id) && params.length) def.code = def.code.replace('np.pi/4', String(params[0]));
+    if (qs.length === 1) gates.push({ id, q: qs[0], params, def, uid });
+    else if (qs.length === 2) gates.push({ id, q: qs[0], q2: qs[1], params: o.p || [], def, uid });
+    else { gates.push({ id, q: qs[0], q2: qs[1], q3: qs[2], params: o.p || [], def, uid }); }
   }
   return gates;
 }
@@ -3330,6 +3351,7 @@ function init() {
         if (pyodide) injectIgnoredAttrsIntoPython(pyodide);
     });
     for (let i = 0; i < circuit.qubits; i++) blochStates[i] = { theta: 0, phi: 0 };
+    loadStoredCustomGates();
     buildPalette();
     renderCircuit();
     updateCircuitInfo();
@@ -3426,6 +3448,7 @@ function returnToNotebook(){
             q:   g.q,
             q2:  g.q2,
             q3:  g.q3,
+            params: g.params || [],
             uid: g.uid,
             qs:  g.qs, block: g.block || null,
             def: {
