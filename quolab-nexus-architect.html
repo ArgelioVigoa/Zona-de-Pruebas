@@ -831,9 +831,10 @@ function placeGate(gateId, qubit) {
   } else if (def.multi) {
     if (circuit.qubits < 2) { notify('You need at least 2 qubits'); isUpdatingFromCircuit = false; return; }
     const q2 = qubit + 1 < circuit.qubits ? qubit + 1 : qubit - 1;
-    if (circuit.gates.some(g => g.id === 'M' && !g.autoMeasurement && (g.q === qubit || g.q === q2))) { isUpdatingFromCircuit = false; notify('❌ A gate cannot be placed after a measurement.'); return; }
+    if (circuit.gates.some(g => g.id === 'M' && !g.autoMeasurement && (g.q === qubit || g.q2 === qubit || g.q === q2 || g.q2 === q2))) { isUpdatingFromCircuit = false; notify('❌ A gate cannot be placed after a measurement.'); return; }
     removeAutoMeasurementsForWires([qubit, q2]);
-    circuit.gates.push({ id: gateId, q: Math.min(qubit, q2), q2: Math.max(qubit, q2), def: def, uid: nextId++ });
+    // Preserve operand order: for CX, q is the control and q2 is the target.
+    circuit.gates.push({ id: gateId, q: qubit, q2, def: def, uid: nextId++ });
   } else {
     if (gateId === 'M') {
       if (!circuit.gates.some(g => g.id !== 'M' && (g.q === qubit || g.q2 === qubit || g.q3 === qubit))) {
@@ -1021,34 +1022,22 @@ function renderCircuit() {
       }
       html += `<div style="position:absolute; left:${left}px; top:${topY}px;">${svg}</div>`;
     } else if (g.q2 !== undefined) {
-      const topY = g.q * ROW_HEIGHT;
-      const height = (g.q2 - g.q) * ROW_HEIGHT;
+      const minQ = Math.min(g.q, g.q2), maxQ = Math.max(g.q, g.q2);
+      const topY = minQ * ROW_HEIGHT;
+      const height = (maxQ - minQ) * ROW_HEIGHT;
+      const controlY = (g.q - minQ) * ROW_HEIGHT + ROW_HEIGHT / 2;
+      const targetY = (g.q2 - minQ) * ROW_HEIGHT + ROW_HEIGHT / 2;
       const gCol = g.def?.bg || '#0088ff';
-      let svg = '';
+      let svg = '<line x1="24" y1="0" x2="24" y2="' + (ROW_HEIGHT + height) + '" stroke="' + gCol + '" stroke-width="2.5"/>';
       if (g.id === 'CX') {
-        svg = `<svg width="48" height="${ROW_HEIGHT + height}" viewBox="0 0 48 ${ROW_HEIGHT + height}" style="cursor:pointer;" onclick="removeGate(${g.uid})">
-          <line x1="24" y1="0" x2="24" y2="${ROW_HEIGHT + height}" stroke="${gCol}" stroke-width="2.5"/>
-          <circle cx="24" cy="${ROW_HEIGHT / 2}" r="8" fill="${gCol}" stroke="rgba(255,255,255,.9)" stroke-width="1.5"/>
-          <circle cx="24" cy="${ROW_HEIGHT / 2 + height}" r="14" fill="none" stroke="${gCol}" stroke-width="2.5"/>
-          <line x1="16" y1="${ROW_HEIGHT / 2 + height}" x2="32" y2="${ROW_HEIGHT / 2 + height}" stroke="${gCol}" stroke-width="2"/>
-          <line x1="24" y1="${ROW_HEIGHT / 2 + height - 10}" x2="24" y2="${ROW_HEIGHT / 2 + height + 10}" stroke="${gCol}" stroke-width="2"/>
-        </svg>`;
+        svg += '<circle cx="24" cy="' + controlY + '" r="8" fill="' + gCol + '" stroke="rgba(255,255,255,.9)" stroke-width="1.5"/>';
+        svg += '<circle cx="24" cy="' + targetY + '" r="14" fill="none" stroke="' + gCol + '" stroke-width="2.5"/><path d="M16 ' + targetY + ' H32 M24 ' + (targetY-10) + ' V' + (targetY+10) + '" stroke="' + gCol + '" stroke-width="2"/>';
       } else if (g.id === 'CZ') {
-        svg = `<svg width="48" height="${ROW_HEIGHT + height}" viewBox="0 0 48 ${ROW_HEIGHT + height}" style="cursor:pointer;" onclick="removeGate(${g.uid})">
-          <line x1="24" y1="0" x2="24" y2="${ROW_HEIGHT + height}" stroke="${gCol}" stroke-width="2.5"/>
-          <circle cx="24" cy="${ROW_HEIGHT / 2}" r="8" fill="${gCol}" stroke="rgba(255,255,255,.9)" stroke-width="1.5"/>
-          <circle cx="24" cy="${ROW_HEIGHT / 2 + height}" r="8" fill="${gCol}" stroke="rgba(255,255,255,.9)" stroke-width="1.5"/>
-        </svg>`;
+        svg += '<circle cx="24" cy="' + controlY + '" r="8" fill="' + gCol + '" stroke="rgba(255,255,255,.9)" stroke-width="1.5"/><circle cx="24" cy="' + targetY + '" r="8" fill="' + gCol + '" stroke="rgba(255,255,255,.9)" stroke-width="1.5"/>';
       } else if (g.id === 'SWAP') {
-        svg = `<svg width="48" height="${ROW_HEIGHT + height}" viewBox="0 0 48 ${ROW_HEIGHT + height}" style="cursor:pointer;" onclick="removeGate(${g.uid})">
-          <line x1="24" y1="0" x2="24" y2="${ROW_HEIGHT + height}" stroke="${gCol}" stroke-width="2.5"/>
-          <line x1="16" y1="${ROW_HEIGHT / 2 - 6}" x2="32" y2="${ROW_HEIGHT / 2 + 6}" stroke="${gCol}" stroke-width="2"/>
-          <line x1="32" y1="${ROW_HEIGHT / 2 - 6}" x2="16" y2="${ROW_HEIGHT / 2 + 6}" stroke="${gCol}" stroke-width="2"/>
-          <line x1="16" y1="${ROW_HEIGHT / 2 + height - 6}" x2="32" y2="${ROW_HEIGHT / 2 + height + 6}" stroke="${gCol}" stroke-width="2"/>
-          <line x1="32" y1="${ROW_HEIGHT / 2 + height - 6}" x2="16" y2="${ROW_HEIGHT / 2 + height + 6}" stroke="${gCol}" stroke-width="2"/>
-        </svg>`;
+        for (const y of [controlY, targetY]) svg += '<path d="M16 ' + (y-6) + ' L32 ' + (y+6) + ' M32 ' + (y-6) + ' L16 ' + (y+6) + '" stroke="' + gCol + '" stroke-width="2"/>';
       }
-      html += `<div style="position:absolute; left:${left}px; top:${topY}px;">${svg}</div>`;
+      html += '<div style="position:absolute; left:' + left + 'px; top:' + topY + 'px;"><svg width="48" height="' + (ROW_HEIGHT + height) + '" viewBox="0 0 48 ' + (ROW_HEIGHT + height) + '" style="cursor:pointer;" onclick="removeGate(' + g.uid + ')">' + svg + '</svg></div>';
     } else {
       const yPos = g.q * ROW_HEIGHT;
       html += `<div class="placed-gate" draggable="true" 
