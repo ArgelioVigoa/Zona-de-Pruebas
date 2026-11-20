@@ -1,8 +1,8 @@
-name: Deploy QuoLab Nexus preview
+name: Deploy QuoLab Nexus
 
 on:
   push:
-    branches: ["web-preview", "feature/quantum-gate-designer"]
+    branches: ["main"]
   workflow_dispatch:
 
 permissions:
@@ -11,40 +11,34 @@ permissions:
   id-token: write
 
 concurrency:
-  group: "github-pages-preview"
+  group: "github-pages"
   cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout stable preview branch
+      - name: Checkout main
         uses: actions/checkout@v4
-        with:
-          ref: web-preview
-          path: stable-src
-      - name: Checkout interactive feature branch
-        uses: actions/checkout@v4
-        with:
-          ref: feature/quantum-gate-designer
-          path: feature-src
-      - name: Assemble stable site and isolated feature preview
+      - name: Assemble interactive main site
         run: |
           set -euo pipefail
-          test -s stable-src/quolab-nexus-2.0-data-analyzer-integration.zip
-          mkdir source
-          unzip -q stable-src/quolab-nexus-2.0-data-analyzer-integration.zip -d source
-          ROOT="source/quantum-computing-open-lab-2.0-main"
-          test -s "$ROOT/index.html"
-          test -s "$ROOT/quolab-nexus-data-analyzer.html"
+          test -s index.html
+          test -s quolab-nexus-gate-designer.html
+          test -s quolab-nexus-data-analyzer.html
           rm -rf dist
-          mkdir -p dist/feature
-          cp "$ROOT/index.html" "$ROOT"/quolab-nexus-*.html "$ROOT"/quolab-nexus-*.js "$ROOT/.nojekyll" dist/
-          rsync -a --delete --exclude='.git' --exclude='quolab-nexus-2.0-data-analyzer-integration.zip' feature-src/ dist/feature/
+          mkdir -p dist
+          rsync -a --delete \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='*.zip' \
+            --exclude='__pycache__' \
+            --exclude='*.pyc' \
+            ./ dist/
+          touch dist/.nojekyll
           test -s dist/index.html
+          test -s dist/quolab-nexus-gate-designer.html
           test -s dist/quolab-nexus-data-analyzer.html
-          test -s dist/feature/index.html
-          test -s dist/feature/quolab-nexus-gate-designer.html
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
