@@ -55,7 +55,7 @@ app = FastAPI(title="QuOLab Nexus Motor", version="2.1.0")
 ALLOWED_ORIGINS = [
     origin.strip() for origin in os.environ.get(
         "QUOLAB_ALLOWED_ORIGINS",
-        "https://laffitacamargof-create.github.io,https://quantum-computing-open-lab.vercel.app,http://localhost:8000,http://localhost:7860"
+        "https://laffitacamargof-create.github.io,https://argeliovigoa.github.io,https://quantum-computing-open-lab.vercel.app,http://localhost:8000,http://localhost:7860"
     ).split(",") if origin.strip()
 ]
 app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS,
