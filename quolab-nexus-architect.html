@@ -825,7 +825,7 @@ function loadStoredCustomGates(){try{const all=JSON.parse(localStorage.getItem(C
 window.addEventListener('message',event=>{
   if(event.source!==window.parent||event.origin!==location.origin)return;
   const d=event.data||{};if(d.type!=='OPENQ_CUSTOM_GATE'||d.protocol!=='quolab.custom-gate'||d.protocolVersion!=='1.0.0')return;
-  try{const result=installCustomGate(d.gate,true);if(d.gate.qubits===2&&circuit.qubits<2)circuit.qubits=2;buildPalette();renderCircuit();updateCircuitInfo();updateCodeFromCircuit();
+  try{const result=installCustomGate(d.gate,true);while(d.gate.qubits===2&&circuit.qubits<2)addQubit();buildPalette();renderCircuit();updateCircuitInfo();updateCodeFromCircuit();
     window.parent.postMessage({type:'OPENQ_CUSTOM_GATE_RESPONSE',requestId:d.requestId,ok:true,gateId:result.id,message:'Custom unitary added to Architect palette and emitted as Qiskit qc.unitary().'},location.origin);
   }catch(err){window.parent.postMessage({type:'OPENQ_CUSTOM_GATE_RESPONSE',requestId:d.requestId,ok:false,message:err.message||'Custom gate rejected.'},location.origin)}
 });
