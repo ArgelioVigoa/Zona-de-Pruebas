@@ -7,6 +7,7 @@
   const TOOL_BY_FILE = {
     'quolab-nexus-projects.html': 'projects',
     'quolab-nexus-architect.html': 'architect',
+    'quolab-nexus-gate-designer.html': 'gate-designer',
     'quolab-nexus-quantum-notebook.html': 'architect-pro',
     'quolab-nexus-library.html': 'library',
     'quolab-nexus-help.html': 'help',
