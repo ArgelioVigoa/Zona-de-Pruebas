@@ -9,7 +9,7 @@ const h=1/Math.sqrt(2);
 const gates={
  H:[[C(h),C(h)],[C(h),C(-h)]],X:[[C(0),C(1)],[C(1),C(0)]],
  Y:[[C(0),C(0,-1)],[C(0,1),C(0)]],Z:[[C(1),C(0)],[C(0),C(-1)]],
- S:[[C(1),C(0)],[C(0,1),C(0)]],T:[[C(1),C(0)],[C(0),C(h,h)]]
+ S:[[C(1),C(0)],[C(0),C(0,1)]],T:[[C(1),C(0)],[C(0),C(h,h)]]
 };
 for(const [name,m] of Object.entries(gates)){assert.equal(valid(m),true,name+' must be unitary')}
 const kron=(a,b)=>a.flatMap(ar=>b.map(br=>ar.flatMap(x=>br.map(y=>mul(x,y)))));
