@@ -2,7 +2,7 @@ name: Deploy QuoLab Nexus preview
 
 on:
   push:
-    branches: ["web-preview"]
+    branches: ["web-preview", "feature/quantum-gate-designer"]
   workflow_dispatch:
 
 permissions:
@@ -18,22 +18,33 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout preview branch
+      - name: Checkout stable preview branch
         uses: actions/checkout@v4
-      - name: Assemble static website from the preserved integration ZIP
+        with:
+          ref: web-preview
+          path: stable-src
+      - name: Checkout interactive feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/quantum-gate-designer
+          path: feature-src
+      - name: Assemble stable site and isolated feature preview
         run: |
           set -euo pipefail
-          test -s quolab-nexus-2.0-data-analyzer-integration.zip
+          test -s stable-src/quolab-nexus-2.0-data-analyzer-integration.zip
           mkdir source
-          unzip -q quolab-nexus-2.0-data-analyzer-integration.zip -d source
+          unzip -q stable-src/quolab-nexus-2.0-data-analyzer-integration.zip -d source
           ROOT="source/quantum-computing-open-lab-2.0-main"
           test -s "$ROOT/index.html"
           test -s "$ROOT/quolab-nexus-data-analyzer.html"
           rm -rf dist
-          mkdir -p dist
+          mkdir -p dist/feature
           cp "$ROOT/index.html" "$ROOT"/quolab-nexus-*.html "$ROOT"/quolab-nexus-*.js "$ROOT/.nojekyll" dist/
+          rsync -a --delete --exclude='.git' --exclude='quolab-nexus-2.0-data-analyzer-integration.zip' feature-src/ dist/feature/
           test -s dist/index.html
           test -s dist/quolab-nexus-data-analyzer.html
+          test -s dist/feature/index.html
+          test -s dist/feature/quolab-nexus-gate-designer.html
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
