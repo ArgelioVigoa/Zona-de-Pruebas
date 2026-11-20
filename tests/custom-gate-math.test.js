@@ -14,9 +14,10 @@ const gates={
 for(const [name,m] of Object.entries(gates)){assert.equal(valid(m),true,name+' must be unitary')}
 const kron=(a,b)=>a.flatMap(ar=>b.map(br=>ar.flatMap(x=>br.map(y=>mul(x,y)))));
 const cx=I(4);for(let x=0;x<4;x++){const y=((x&1)!==0)?x^2:x;cx[y][x]=C(1);if(y!==x)cx[x][x]=C(0)}
-const cz=I(4);cz[3][3]=C(-1);
-const sw=I(4);sw[1][1]=C(0);sw[2][2]=C(0);sw[1][2]=C(1);sw[2][1]=C(1);
-assert.equal(valid(cx),true,'CNOT must be unitary');
+function twoQ(id,q,q2){const m=Array.from({length:4},()=>Array.from({length:4},()=>C(0)));for(let x=0;x<4;x++){let y=x,phase=1;if(id==='CX'&&((x>>q)&1))y=x^(1<<q2);else if(id==='CZ'&&((x>>q)&1)&&((x>>q2)&1))phase=-1;else if(id==='SWAP'){const a=(x>>q)&1,b=(x>>q2)&1;if(a!==b)y=x^(1<<q)^(1<<q2)}m[y][x]=C(phase)}return m}
+const cz=twoQ('CZ',0,1),sw=twoQ('SWAP',0,1),cxBuilt=twoQ('CX',0,1);
+assert.equal(valid(cx),true,'CNOT test reference must be unitary');
+assert.equal(valid(cxBuilt),true,'constructed CNOT must be unitary');
 assert.equal(valid(cz),true,'CZ must be unitary');
 assert.equal(valid(sw),true,'SWAP must be unitary');
 assert.equal(valid(kron(I(2),gates.H)),true,'q0 LSB tensor embedding must be unitary');
