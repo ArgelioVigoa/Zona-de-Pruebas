@@ -93,17 +93,17 @@ function backendCode(p){
  var rows=p.matrix.data.map(function(row){return '['+row.map(function(z){var im=Number(z.im);return '('+Number(z.re).toPrecision(17)+(im<0?' - ':' + ')+Math.abs(im).toPrecision(17)+'j)'}).join(', ')+']'}).join(',\n');
  return 'import numpy as np\nfrom qiskit import QuantumCircuit\nfrom qiskit.quantum_info import Operator\n\nU = np.array(['+rows+'], dtype=complex)\nqc = QuantumCircuit('+p.qubits+')\nqc.unitary(U, list(range('+p.qubits+')))\nU_backend = Operator(qc).data\nmax_error = float(np.max(np.abs(U_backend - U)))\nprint("QGATE_BACKEND_TEST_MAX_ERROR=" + format(max_error, ".17g"))\n';
 }
-async function backendRequest(path,body,isHF){
+async function backendRequest(path,body,isHF,allowHttpError){
  var controller=new AbortController(),timer=setTimeout(function(){controller.abort()},30000);
- try{var res=await fetch(backendBase()+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:controller.signal});var raw=await res.json();if(!res.ok)throw Error('HTTP '+res.status+': '+JSON.stringify(raw).slice(0,400));return unwrapBackend(raw,isHF)}
+ try{var res=await fetch(backendBase()+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:controller.signal});var raw=await res.json();if(!res.ok&&!allowHttpError)throw Error('HTTP '+res.status+': '+JSON.stringify(raw).slice(0,400));var parsed=unwrapBackend(raw,isHF);parsed._httpStatus=res.status;return parsed}
  finally{clearTimeout(timer)}
 }
 $('backend-url').value=localStorage.getItem('openq_colab_url')||'';
 $('backend-health').onclick=async function(){
  var box=$('backend-status');box.className='status warn';box.textContent='Checking backend health…';
- try{var base=backendBase(),isHF=/hf\.space|huggingface/i.test(base),d=await backendRequest(isHF?'/health/predict':'/health',isHF?{data:['']}:{},isHF);
+ try{var base=backendBase(),isHF=/hf\.space|huggingface/i.test(base),d=await backendRequest(isHF?'/health/predict':'/health',isHF?{data:['']}:{},isHF,true);
  if(d.status!=='ok'&&d.status!=='degraded'&&!d.libs)throw Error('Unexpected health response: '+JSON.stringify(d).slice(0,350));
- localStorage.setItem('openq_colab_url',base);box.className='status good';box.textContent='Backend responded. Status: '+(d.status||'reachable')+'\nQiskit: '+((d.versions&&d.versions.qiskit)||((d.libs||[]).includes('qiskit')?'installed':'not reported'))+'\nSandbox: '+(d.sandbox?(d.sandbox.ready?'ready':'not ready'):'not reported');
+ localStorage.setItem('openq_colab_url',base);var ready=!!(d.sandbox&&d.sandbox.ready);box.className='status '+(d._httpStatus===200&&ready?'good':'warn');box.textContent='Backend responded (HTTP '+d._httpStatus+'). Status: '+(d.status||'reachable')+'\nQiskit: '+((d.versions&&d.versions.qiskit)||((d.libs||[]).includes('qiskit')?'installed':'not reported'))+'\nSandbox: '+(d.sandbox?(ready?'ready':'not ready ('+(d.sandbox.reason||'unknown')+')'):'not reported');
  }catch(e){box.className='status bad';box.textContent='Connection check failed: '+(e.name==='AbortError'?'timeout':e.message)}
 };
 $('backend-test').onclick=async function(){
