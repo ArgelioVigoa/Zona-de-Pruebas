@@ -706,6 +706,15 @@ body::before{content:'';position:fixed;inset:0;
     </div>
   </div>
 
+  <div class="screen" id="screen-gate-designer">
+    <div class="screen-hdr">
+      <button class="btn-back" onclick="QuOLabNexus.nav('home')">← MENU</button>
+      <div class="screen-title">⚛ QUANTUM GATE DESIGNER</div>
+      <div style="font-size:.58rem;color:var(--mu);font-family:var(--mono);">CUSTOM UNITARY WORKBENCH</div>
+    </div>
+    <div class="module-iframe-wrap" id="gate-designer-wrap"></div>
+  </div>
+
   <div class="screen" id="screen-library">
     <div class="screen-hdr">
       <button class="btn-back" onclick="QuOLabNexus.nav('home')">← MENU</button>
@@ -1082,6 +1091,7 @@ class QuOLabNexusConfigSyncReader {
     help:           'quolab-nexus-help.html',
     'quantum-puzzle':'quolab-nexus-quantum-puzzle.html',
     'data-analyzer':'quolab-nexus-data-analyzer.html',
+    'gate-designer':'quolab-nexus-gate-designer.html',
   };
 
   let curUser = null;
@@ -1864,6 +1874,13 @@ class QuOLabNexusConfigSyncReader {
         title:'⚙️ QUANTUM OPEN LAB', badge:'badge-new', badgeTxt:'QUANTUM',
         desc:'Visual quantum circuit editor with real Python execution (Qiskit). Design and simulate quantum circuits, save them to your account.',
         delay:.1, show:true,
+      },
+      {
+        screen:'gate-designer',
+        icon:`<svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="3" stroke="#00ccff" stroke-width="1.5"/><path d="M7 7h10M7 12h10M7 17h10" stroke="#00ffdd" stroke-width="1.4"/><circle cx="8" cy="7" r="1.5" fill="#00ccff"/><circle cx="16" cy="17" r="1.5" fill="#00ffdd"/></svg>`,
+        title:'QUANTUM GATE DESIGNER', badge:'badge-new', badgeTxt:'DESIGN',
+        desc:'Design custom unitary quantum gates, validate matrices, compose small circuits and export compatible Qiskit definitions.',
+        delay:.13, show:true,
       },
       {
         screen:'architect-pro',
