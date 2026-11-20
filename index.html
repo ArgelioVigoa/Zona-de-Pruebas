@@ -1234,6 +1234,16 @@ class QuOLabNexusConfigSyncReader {
       notebook.contentWindow.postMessage({type:'OPENQ_CUSTOM_GATE_NOTEBOOK',requestId:d.requestId,code:d.code,name:String(d.gate && d.gate.name || 'Custom gate').slice(0,100)},location.origin);
       return;
     }
+    if (d.type === 'OPENQ_CUSTOM_GATE_RESPONSE') {
+      const architect = iframes['architect'], gateFrame = iframes['gate-designer'];
+      if (architect && e.source === architect.contentWindow && e.origin === location.origin && gateFrame) gateFrame.contentWindow.postMessage(d,location.origin);
+      return;
+    }
+    if (d.type === 'OPENQ_CUSTOM_GATE_NOTEBOOK_RESPONSE') {
+      const notebook = iframes['architect-pro'], gateFrame = iframes['gate-designer'];
+      if (notebook && e.source === notebook.contentWindow && e.origin === location.origin && gateFrame) gateFrame.contentWindow.postMessage(d,location.origin);
+      return;
+    }
     if (d.type === 'OPENQ_CUSTOM_GATE') {
       const gateFrame = iframes['gate-designer'];
       if (!gateFrame || e.source !== gateFrame.contentWindow || e.origin !== location.origin) return;
